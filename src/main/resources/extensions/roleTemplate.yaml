@@ -1,0 +1,41 @@
+# 角色模板：匿名用户可查费并缴费
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: role-template-propertyfee-viewer
+  labels:
+    halo.run/role-template: "true"
+    rbac.authorization.halo.run/aggregate-to-anonymous: "true"
+  annotations:
+    rbac.authorization.halo.run/module: "PropertyFee"
+    rbac.authorization.halo.run/display-name: "物业费查询缴费"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:propertyfee:view"]
+rules:
+  - apiGroups: ["api.propertyfee.halo.run"]
+    resources: ["properties", "properties/options", "feerecords", "feerecords/status"]
+    verbs: ["get", "list"]
+  # 2段路径的 POST 会被 Halo 判定为非资源请求(nonResourceURLs)，需单独放行
+  - nonResourceURLs:
+      - "/apis/api.propertyfee.halo.run/v1alpha1/properties/fee-query"
+      - "/apis/api.propertyfee.halo.run/v1alpha1/feerecords/pay"
+      - "/apis/api.propertyfee.halo.run/v1alpha1/feerecords/notify"
+    verbs: ["create"]
+---
+# 角色模板：物业费管理（控制台）
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: role-template-propertyfee-manage
+  labels:
+    halo.run/role-template: "true"
+    rbac.authorization.halo.run/aggregate-to-console-ui: "true"
+  annotations:
+    rbac.authorization.halo.run/module: "PropertyFee"
+    rbac.authorization.halo.run/display-name: "物业费管理"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:propertyfee:manage"]
+rules:
+  - apiGroups: ["console.api.propertyfee.halo.run", "propertyfee.halo.run"]
+    resources: ["*"]
+    verbs: ["*"]
