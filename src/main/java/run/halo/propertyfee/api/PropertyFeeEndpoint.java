@@ -132,25 +132,31 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         }
         int year = req.year() == null ? java.time.Year.now().getValue() : req.year();
         return findProperty(req.community(), req.building(), req.room())
-            .flatMap(property -> findStandard(req.community(), year)
+            .flatMap(property -> findStandard(req.community(), property.getSpec() == null
+                    ? null : property.getSpec().getPropertyType(), year)
                 .flatMap(standard -> calcFeeAmount(property, standard)
-                    .map(calc -> {
-                        Map<String, Object> result = new java.util.HashMap<>();
-                        result.put("property", toPropertyMap(property));
-                        result.put("year", year);
-                        result.put("area", calc.area);
-                        result.put("unitPrice", calc.unitPrice);
-                        result.put("propertyFee", round2(calc.propertyFee));
-                        result.put("extraFees", calc.extraFees);
-                        result.put("extraFeeTotal", round2(calc.extraFeeTotal));
-                        result.put("totalAmount", round2(calc.totalAmount));
-                        result.put("paid", calc.paid);
-                        result.put("paidAt", calc.paidAt == null ? null : calc.paidAt.toString());
-                        result.put("message", calc.paid
-                            ? "该房号 " + year + " 年物业费已缴纳，感谢支持！"
-                            : "查询成功，请核对费用后完成支付");
-                        return result;
-                    })));
+                    .flatMap(calc -> wechatPayService.listChannels(req.community())
+                        .map(channels -> {
+                            Map<String, Object> result = new java.util.HashMap<>();
+                            result.put("property", toPropertyMap(property));
+                            result.put("year", year);
+                            result.put("area", calc.area);
+                            result.put("unitPrice", calc.unitPrice);
+                            result.put("propertyType", calc.propertyType);
+                            result.put("billingCycle", calc.billingCycle);
+                            result.put("propertyFee", round2(calc.propertyFee));
+                            result.put("extraFees", calc.extraFees);
+                            result.put("extraFeeTotal", round2(calc.extraFeeTotal));
+                            result.put("discountAmount", round2(calc.discountAmount));
+                            result.put("totalAmount", round2(calc.totalAmount));
+                            result.put("paid", calc.paid);
+                            result.put("paidAt", calc.paidAt == null ? null : calc.paidAt.toString());
+                            result.put("channels", channels);
+                            result.put("message", calc.paid
+                                ? "该房号 " + year + " 年物业费已缴纳，感谢支持！"
+                                : "查询成功，请核对费用后完成支付");
+                            return result;
+                        }))));
     }
 
     private Mono<Property> findProperty(String community, String building, String room) {
@@ -165,35 +171,77 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             .switchIfEmpty(Mono.error(new PropertyFeeException("未找到该房屋信息，请核对小区/楼栋/房号")));
     }
 
-    private Mono<FeeStandard> findStandard(String community, int year) {
+    private Mono<FeeStandard> findStandard(String community, String propertyType, int year) {
         return client.listAll(FeeStandard.class, ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
             .filter(fs -> fs.getSpec() != null && community.equals(fs.getSpec().getCommunity())
-                && Integer.valueOf(year).equals(fs.getSpec().getYear()))
-            .next()
-            .switchIfEmpty(Mono.error(new PropertyFeeException(
-                "该小区 " + year + " 年收费标准未配置，请联系物业")));
+                && Integer.valueOf(year).equals(fs.getSpec().getYear())
+                && !Boolean.FALSE.equals(fs.getSpec().getEnabled()))
+            .collectList()
+            .flatMap(list -> {
+                if (list.isEmpty()) {
+                    return Mono.error(new PropertyFeeException(
+                        "该小区 " + year + " 年收费标准未配置，请联系物业"));
+                }
+                // 优先匹配物业类型（住宅/商铺/车位）；否则取第一条
+                if (propertyType != null && !propertyType.isBlank()) {
+                    var hit = list.stream().filter(fs -> propertyType.equals(fs.getSpec().getPropertyType()))
+                        .findFirst().orElse(null);
+                    if (hit != null) {
+                        return Mono.just(hit);
+                    }
+                }
+                return Mono.just(list.get(0));
+            });
     }
 
-    /** 计算应缴（含已缴检查）。 */
+    /** 计算应缴（含已缴检查）。支持：周期换算、优惠减免、物业类型。 */
     private Mono<FeeCalc> calcFeeAmount(Property property, FeeStandard standard) {
         FeeCalc calc = new FeeCalc();
         var ps = property.getSpec();
         var ss = standard.getSpec();
         calc.area = ps.getArea() == null ? 0 : ps.getArea();
         calc.unitPrice = ss.getUnitPrice() == null ? 0 : ss.getUnitPrice();
-        calc.propertyFee = calc.area * calc.unitPrice * 12;
+        calc.propertyType = ss.getPropertyType() == null ? "住宅" : ss.getPropertyType();
+        calc.billingCycle = ss.getBillingCycle() == null ? "year" : ss.getBillingCycle();
+        // 物业费：面积 × 单价 × 月数（按周期换算，年缴12个月）
+        int months = monthsOf(calc.billingCycle);
+        calc.propertyFee = calc.area * calc.unitPrice * months;
         calc.extraFees = new ArrayList<>();
         if (ss.getExtraFees() != null) {
             for (var ef : ss.getExtraFees()) {
                 Map<String, Object> m = new java.util.HashMap<>();
                 m.put("name", ef.getName());
-                m.put("amount", round2(ef.getAmount() == null ? 0 : ef.getAmount()));
+                double amt = ef.getAmount() == null ? 0 : ef.getAmount();
+                // 计费方式：fixed 固定金额 / perArea 按面积 / perMonth 按月
+                String mode = ef.getChargeMode() == null ? "fixed" : ef.getChargeMode();
+                if ("perArea".equals(mode)) {
+                    amt = amt * calc.area;
+                } else if ("perMonth".equals(mode)) {
+                    amt = amt * months;
+                }
+                m.put("amount", round2(amt));
+                m.put("chargeMode", mode);
                 calc.extraFees.add(m);
-                calc.extraFeeTotal += ef.getAmount() == null ? 0 : ef.getAmount();
+                calc.extraFeeTotal += amt;
             }
         }
-        calc.totalAmount = calc.propertyFee + calc.extraFeeTotal;
+        double subtotal = calc.propertyFee + calc.extraFeeTotal;
+        // 优惠减免
+        calc.discountAmount = 0;
+        if (ss.getDiscount() != null) {
+            var d = ss.getDiscount();
+            if ("amount".equals(d.getType()) && d.getAmount() != null) {
+                calc.discountAmount = Math.min(d.getAmount(), subtotal);
+            } else if ("percent".equals(d.getType()) && d.getPercent() != null) {
+                calc.discountAmount = subtotal * d.getPercent();
+            } else if ("firstYear".equals(d.getType())) {
+                // 首年优惠：减免一半（可自定义）
+                double pct = d.getPercent() == null ? 0.5 : d.getPercent();
+                calc.discountAmount = subtotal * pct;
+            }
+        }
+        calc.totalAmount = subtotal - calc.discountAmount;
         int year = ss.getYear();
         return client.listAll(FeeRecord.class, ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
@@ -210,12 +258,29 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             .defaultIfEmpty(calc);
     }
 
+    /** 缴费周期 → 月数。 */
+    private int monthsOf(String cycle) {
+        if ("half".equals(cycle)) {
+            return 6;
+        }
+        if ("quarter".equals(cycle)) {
+            return 3;
+        }
+        if ("month".equals(cycle)) {
+            return 1;
+        }
+        return 12;
+    }
+
     private static class FeeCalc {
         double area;
         double unitPrice;
+        String propertyType;
+        String billingCycle;
         double propertyFee;
         List<Map<String, Object>> extraFees;
         double extraFeeTotal;
+        double discountAmount;
         double totalAmount;
         boolean paid;
         Instant paidAt;
@@ -238,9 +303,12 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             return Mono.error(new PropertyFeeException("请完整选择小区/楼栋/房号"));
         }
         int year = req.year() == null ? java.time.Year.now().getValue() : req.year();
+        String payType = req.payType() == null ? "native" : req.payType();
         return findProperty(req.community(), req.building(), req.room())
-            .flatMap(property -> findStandard(req.community(), year)
-                .flatMap(standard -> wechatPayService.getConfig(req.community())
+            .flatMap(property -> findStandard(req.community(), property.getSpec() == null
+                    ? null : property.getSpec().getPropertyType(), year)
+                .flatMap(standard -> wechatPayService.getConfig(req.community(), payType,
+                        req.payChannel())
                     .flatMap(pc -> {
                         return calcFeeAmount(property, standard).flatMap(calc -> {
                             if (calc.paid) {
@@ -271,12 +339,28 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                             spec.setStatus("PENDING");
                             spec.setMchId(pc.getSpec().getMchId());
                             spec.setOutTradeNo(outTradeNo);
-                            spec.setPayType(req.payType() == null ? "native" : req.payType());
+                            spec.setPayType(payType);
                             spec.setCreatedAt(Instant.now());
                             spec.setOwnerName(property.getSpec().getOwnerName());
                             spec.setOwnerPhone(property.getSpec().getOwnerPhone());
                             rec.setSpec(spec);
 
+                            // 线下渠道：直接标记 PAID + 备注（管理员确认收款后）
+                            if ("offline".equals(payType)) {
+                                spec.setStatus("PAID");
+                                spec.setPaidAt(Instant.now());
+                                spec.setTransactionId("OFFLINE-" + outTradeNo);
+                                if (req.remark() != null && !req.remark().isBlank()) {
+                                    spec.setRemark(req.remark());
+                                }
+                                return client.create(rec)
+                                    .thenReturn(Map.of(
+                                        "outTradeNo", outTradeNo,
+                                        "totalAmount", round2(calc.totalAmount),
+                                        "payType", "offline",
+                                        "status", "PAID",
+                                        "message", "线下收款已登记，缴费完成"));
+                            }
                             return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req));
                         });
                     })));
@@ -471,8 +555,11 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             m.put("unit", s.getUnit());
             m.put("room", s.getRoom());
             m.put("area", s.getArea());
+            m.put("propertyType", s.getPropertyType());
             m.put("ownerName", s.getOwnerName());
             m.put("ownerPhone", s.getOwnerPhone());
+            m.put("ownerType", s.getOwnerType());
+            m.put("houseStatus", s.getHouseStatus());
         }
         return m;
     }

@@ -33,20 +33,82 @@ public class WechatPayService {
      * 优先匹配小区专属商户；若未配置则回退到「默认商户」（协会统一微信支付通道）。
      */
     public Mono<PaymentConfig> getConfig(String community) {
+        return getConfig(community, null, null);
+    }
+
+    /**
+     * 按小区 + 渠道类型 + 渠道名称获取支付配置。
+     * 匹配优先级：小区+渠道名称 > 小区+渠道类型(启用且默认) > 小区任意启用渠道
+     *          > 默认商户+渠道类型 > 默认商户任意启用渠道。
+     */
+    public Mono<PaymentConfig> getConfig(String community, String channelType, String payChannel) {
+        return client.listAll(PaymentConfig.class,
+                run.halo.app.extension.ListOptions.builder().build(),
+                org.springframework.data.domain.Sort.unsorted())
+            .filter(pc -> pc.getSpec() != null && community.equals(pc.getSpec().getCommunity()))
+            .collectList()
+            .flatMap(list -> {
+                // 1. 渠道名称精确匹配（前端选中的渠道）
+                if (payChannel != null && !payChannel.isBlank()) {
+                    var hit = list.stream().filter(pc ->
+                            payChannel.equals(pc.getSpec().getChannelName())
+                                && isEnabled(pc)).findFirst().orElse(null);
+                    if (hit != null) {
+                        return Mono.just(hit);
+                    }
+                }
+                // 2. 小区 + 渠道类型 + 默认
+                if (channelType != null && !channelType.isBlank()) {
+                    var hit = list.stream().filter(pc -> channelType.equals(pc.getSpec().getChannelType())
+                            && isEnabled(pc) && Boolean.TRUE.equals(pc.getSpec().getIsDefault()))
+                        .findFirst().orElse(null);
+                    if (hit != null) {
+                        return Mono.just(hit);
+                    }
+                    // 3. 小区 + 渠道类型（任意启用）
+                    hit = list.stream().filter(pc -> channelType.equals(pc.getSpec().getChannelType())
+                            && isEnabled(pc)).findFirst().orElse(null);
+                    if (hit != null) {
+                        return Mono.just(hit);
+                    }
+                }
+                // 4. 小区默认渠道或任意启用渠道
+                var hit = list.stream().filter(pc -> Boolean.TRUE.equals(pc.getSpec().getIsDefault())
+                        && isEnabled(pc)).findFirst().orElse(null);
+                if (hit == null) {
+                    hit = list.stream().filter(this::isEnabled).findFirst().orElse(null);
+                }
+                if (hit != null) {
+                    return Mono.just(hit);
+                }
+                return Mono.empty();
+            })
+            .switchIfEmpty(Mono.defer(() -> getDefaultConfig(channelType)))
+            .switchIfEmpty(Mono.error(new PropertyFeeException("该小区未配置可用支付渠道，请联系物业")));
+    }
+
+    private boolean isEnabled(PaymentConfig pc) {
+        return pc.getSpec() != null && !Boolean.FALSE.equals(pc.getSpec().getEnabled());
+    }
+
+    private Mono<PaymentConfig> getDefaultConfig(String channelType) {
         return client.listAll(PaymentConfig.class,
                 run.halo.app.extension.ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
             .filter(pc -> pc.getSpec() != null
-                && community.equals(pc.getSpec().getCommunity()))
-            .next()
-            .switchIfEmpty(Mono.defer(() ->
-                client.listAll(PaymentConfig.class,
-                        run.halo.app.extension.ListOptions.builder().build(),
-                        org.springframework.data.domain.Sort.unsorted())
-                    .filter(pc -> pc.getSpec() != null
-                        && DEFAULT_COMMUNITY.equals(pc.getSpec().getCommunity()))
-                    .next()))
-            .switchIfEmpty(Mono.error(new PropertyFeeException("该小区未配置微信支付商户，请联系物业")));
+                && DEFAULT_COMMUNITY.equals(pc.getSpec().getCommunity()))
+            .collectList()
+            .flatMap(list -> {
+                if (channelType != null && !channelType.isBlank()) {
+                    var hit = list.stream().filter(pc -> channelType.equals(pc.getSpec().getChannelType())
+                            && isEnabled(pc)).findFirst().orElse(null);
+                    if (hit != null) {
+                        return Mono.just(hit);
+                    }
+                }
+                var hit = list.stream().filter(this::isEnabled).findFirst().orElse(null);
+                return hit == null ? Mono.empty() : Mono.just(hit);
+            });
     }
 
     /** 默认商户配置的小区标记（协会统一微信支付通道）。 */
@@ -60,6 +122,27 @@ public class WechatPayService {
                 run.halo.app.extension.ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
             .collectList();
+    }
+
+    /** 列出小区所有启用渠道（前台展示支付方式用）。 */
+    public Mono<List<Map<String, Object>>> listChannels(String community) {
+        return client.listAll(PaymentConfig.class,
+                run.halo.app.extension.ListOptions.builder().build(),
+                org.springframework.data.domain.Sort.unsorted())
+            .filter(pc -> pc.getSpec() != null && isEnabled(pc)
+                && (community.equals(pc.getSpec().getCommunity())
+                    || DEFAULT_COMMUNITY.equals(pc.getSpec().getCommunity())))
+            .collectList()
+            .map(list -> list.stream().map(pc -> {
+                var s = pc.getSpec();
+                java.util.Map<String, Object> m = new java.util.HashMap<>();
+                m.put("channelName", s.getChannelName() == null || s.getChannelName().isBlank()
+                    ? s.getChannelType() : s.getChannelName());
+                m.put("channelType", s.getChannelType());
+                m.put("isDefault", Boolean.TRUE.equals(s.getIsDefault()));
+                m.put("offlineInstruction", s.getOfflineInstruction());
+                return m;
+            }).toList());
     }
 
     /**

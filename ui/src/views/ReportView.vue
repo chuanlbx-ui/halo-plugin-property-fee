@@ -166,6 +166,50 @@
       </tbody>
     </table>
 
+    <!-- 缴费明细 -->
+    <h3 style="margin: 20px 0 10px; color: #0a2a5e">🧾 缴费明细（{{ year }}年）</h3>
+    <table
+      style="
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(10, 42, 94, 0.06);
+        font-size: 14px;
+      "
+    >
+      <thead>
+        <tr style="background: #f0f4ff; color: #0a2a5e">
+          <th style="padding: 10px; text-align: left">小区/楼栋/房号</th>
+          <th style="padding: 10px; text-align: left">业主</th>
+          <th style="padding: 10px; text-align: center">金额(元)</th>
+          <th style="padding: 10px; text-align: center">支付方式</th>
+          <th style="padding: 10px; text-align: center">状态</th>
+          <th style="padding: 10px; text-align: center">缴费时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="r in records" :key="r.metadata.name">
+          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ r.spec.community }} {{ r.spec.building }}栋{{ r.spec.room }}</td>
+          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ r.spec.ownerName || '-' }}</td>
+          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ r.spec.totalAmount }}</td>
+          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
+            <span :style="{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', background: payTypeBg(r.spec.payType), color: payTypeColor(r.spec.payType) }">{{ payTypeName(r.spec.payType) }}</span>
+          </td>
+          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
+            <span :style="{ color: r.spec.status === 'PAID' ? '#389e0d' : '#d48806' }">{{ r.spec.status }}</span>
+          </td>
+          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8; font-size: 12px">
+            {{ r.spec.paidAt ? formatTime(r.spec.paidAt) : '-' }}
+          </td>
+        </tr>
+        <tr v-if="!records.length">
+          <td colspan="6" style="padding: 20px; text-align: center; color: #999">{{ year }}年暂无缴费记录</td>
+        </tr>
+      </tbody>
+    </table>
+
     <div v-if="!report" style="text-align: center; color: #999; padding: 40px">
       加载中…
     </div>
@@ -183,6 +227,7 @@ const years = computed(() => {
   return [y, y - 1, y + 1]
 })
 const report = ref<any>(null)
+const records = ref<any[]>([])
 
 const overviewCards = computed(() => {
   if (!report.value) return []
@@ -204,6 +249,36 @@ async function load() {
   } catch (e: any) {
     alert('加载失败: ' + (e.response?.data?.message || e.message))
   }
+  await loadRecords()
+}
+
+async function loadRecords() {
+  try {
+    const res = await axios.get(`${API_BASE}/feerecords`)
+    const all = res.data.items || []
+    records.value = all
+      .filter((r: any) => r.spec?.year === year.value && r.spec?.status === 'PAID')
+      .sort((a: any, b: any) => (b.spec?.paidAt || '').localeCompare(a.spec?.paidAt || ''))
+  } catch (e: any) {
+    records.value = []
+  }
+}
+
+function payTypeName(t: string) {
+  return {
+    native: '微信扫码', jsapi: '公众号支付', alipay: '支付宝',
+    offline: '线下收款', h5: 'H5支付',
+  }[t] || t || '-'
+}
+function payTypeBg(t: string) {
+  return { native: '#e6f7ff', jsapi: '#e6f7ff', alipay: '#e6f4ff', offline: '#f6ffed' }[t] || '#f0f0f0'
+}
+function payTypeColor(t: string) {
+  return { native: '#1890ff', jsapi: '#1890ff', alipay: '#1677ff', offline: '#389e0d' }[t] || '#666'
+}
+function formatTime(t: string) {
+  if (!t) return '-'
+  return t.replace('T', ' ').substring(0, 19)
 }
 
 onMounted(load)

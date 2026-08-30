@@ -8,6 +8,7 @@ import run.halo.app.extension.GVK;
 
 /**
  * 房屋（物业单元）。Excel 导入后自动生成，或后台手工添加。
+ * 支持完整业主档案：身份证/业主类型/入住日期/房屋状态/物业类型。
  *
  * @author property-fee
  */
@@ -42,11 +43,26 @@ public class Property extends AbstractExtension {
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
         private Double area;
 
+        /** 物业类型：住宅 / 商铺 / 车位 / 其他（默认住宅）。 */
+        private String propertyType = "住宅";
+
         /** 业主姓名。 */
         private String ownerName;
 
         /** 业主手机号（用于查费/缴费身份识别）。 */
         private String ownerPhone;
+
+        /** 业主身份证号（选填）。 */
+        private String ownerIdCard;
+
+        /** 业主类型：业主 / 租户 / 亲属（默认业主）。 */
+        private String ownerType = "业主";
+
+        /** 入住日期（yyyy-MM-dd，选填）。 */
+        private String moveInDate;
+
+        /** 房屋状态：自住 / 出租 / 空置 / 装修（默认自住）。 */
+        private String houseStatus = "自住";
 
         /** 备注。 */
         private String remark;

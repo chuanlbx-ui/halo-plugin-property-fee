@@ -204,6 +204,31 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                                 s.setOwnerPhone(row.ownerPhone());
                                 changed = true;
                             }
+                            if (row.ownerIdCard() != null && !row.ownerIdCard().isBlank()
+                                && !row.ownerIdCard().equals(s.getOwnerIdCard())) {
+                                s.setOwnerIdCard(row.ownerIdCard());
+                                changed = true;
+                            }
+                            if (row.ownerType() != null && !row.ownerType().isBlank()
+                                && !row.ownerType().equals(s.getOwnerType())) {
+                                s.setOwnerType(row.ownerType());
+                                changed = true;
+                            }
+                            if (row.moveInDate() != null && !row.moveInDate().isBlank()
+                                && !row.moveInDate().equals(s.getMoveInDate())) {
+                                s.setMoveInDate(row.moveInDate());
+                                changed = true;
+                            }
+                            if (row.houseStatus() != null && !row.houseStatus().isBlank()
+                                && !row.houseStatus().equals(s.getHouseStatus())) {
+                                s.setHouseStatus(row.houseStatus());
+                                changed = true;
+                            }
+                            if (row.propertyType() != null && !row.propertyType().isBlank()
+                                && !row.propertyType().equals(s.getPropertyType())) {
+                                s.setPropertyType(row.propertyType());
+                                changed = true;
+                            }
                             if (changed) {
                                 ops.add(client.update(existingP));
                                 created++;
@@ -223,6 +248,14 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                             spec.setArea(row.area());
                             spec.setOwnerName(row.ownerName());
                             spec.setOwnerPhone(row.ownerPhone());
+                            spec.setOwnerIdCard(row.ownerIdCard());
+                            spec.setOwnerType(row.ownerType() == null || row.ownerType().isBlank()
+                                ? "业主" : row.ownerType());
+                            spec.setMoveInDate(row.moveInDate());
+                            spec.setHouseStatus(row.houseStatus() == null || row.houseStatus().isBlank()
+                                ? "自住" : row.houseStatus());
+                            spec.setPropertyType(row.propertyType() == null || row.propertyType().isBlank()
+                                ? "住宅" : row.propertyType());
                             p.setSpec(spec);
                             ops.add(client.create(p));
                             created++;
@@ -300,8 +333,12 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                     || pc.getSpec().getCommunity().isBlank()) {
                     return Mono.error(new PropertyFeeException("小区名称不能为空"));
                 }
-                if (pc.getSpec().getMchId() == null || pc.getSpec().getMchId().isBlank()) {
-                    return Mono.error(new PropertyFeeException("商户号不能为空"));
+                String ct = pc.getSpec().getChannelType() == null ? "wechat_native"
+                    : pc.getSpec().getChannelType();
+                // 微信渠道必须配置商户号；线下/支付宝不强制
+                if (("wechat_native".equals(ct) || "wechat_jsapi".equals(ct))
+                    && (pc.getSpec().getMchId() == null || pc.getSpec().getMchId().isBlank())) {
+                    return Mono.error(new PropertyFeeException("微信渠道商户号不能为空"));
                 }
                 return client.create(pc);
             })

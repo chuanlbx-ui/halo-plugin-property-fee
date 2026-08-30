@@ -72,7 +72,7 @@ public class FeeRecord extends AbstractExtension {
         /** 微信支付交易号（transaction_id）。 */
         private String transactionId;
 
-        /** 支付方式：native（扫码）/ jsapi（微信内）。 */
+        /** 支付方式：native（扫码）/ jsapi（微信内）/ alipay（支付宝）/ offline（线下）。 */
         private String payType;
 
         /** 缴费时间（微信回调成功时间）。 */
@@ -86,5 +86,8 @@ public class FeeRecord extends AbstractExtension {
 
         /** 业主手机号（快照）。 */
         private String ownerPhone;
+
+        /** 备注（线下收款登记/支付渠道名等）。 */
+        private String remark;
     }
 }
