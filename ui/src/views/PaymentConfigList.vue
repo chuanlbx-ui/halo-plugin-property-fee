@@ -183,7 +183,7 @@ async function save() {
       await axios.put(`${API_BASE}/paymentconfigs/${editing.value.metadata.name}`, {
         apiVersion: 'propertyfee.halo.run/v1alpha1',
         kind: 'PaymentConfig',
-        metadata: { name: editing.value.metadata.name },
+        metadata: { name: editing.value.metadata.name, version: editing.value.metadata.version },
         spec,
       })
     } else {

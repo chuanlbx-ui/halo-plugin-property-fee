@@ -1,4 +1,5 @@
 import { definePlugin } from '@halo-dev/console-shared'
+import PropertyHome from './views/PropertyHome.vue'
 import PropertyList from './views/PropertyList.vue'
 import StandardList from './views/StandardList.vue'
 import PaymentConfigList from './views/PaymentConfigList.vue'
@@ -12,11 +13,11 @@ export default definePlugin({
     {
       parentName: 'Root',
       route: {
-        path: '/property-fee/report',
-        name: 'PropertyFeeReport',
-        component: ReportView,
+        path: '/property-fee',
+        name: 'PropertyFeeHome',
+        component: PropertyHome,
         meta: {
-          title: '缴费报表',
+          title: '物业费管理',
           searchable: true,
           menu: {
             name: '物业费管理',
@@ -24,6 +25,18 @@ export default definePlugin({
             icon: markRaw(IconPlug),
             priority: 0,
           },
+        },
+      },
+    },
+    {
+      parentName: 'Root',
+      route: {
+        path: '/property-fee/report',
+        name: 'PropertyFeeReport',
+        component: ReportView,
+        meta: {
+          title: '缴费报表',
+          searchable: true,
         },
       },
     },

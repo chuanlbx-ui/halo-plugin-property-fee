@@ -70,7 +70,7 @@
           ① 下载模板 → ② 填好数据 → ③ 选择文件上传。模板列：小区、楼栋、单元、房号、面积、业主姓名、手机号、身份证号、业主类型(业主/租户)、入住日期、房屋状态(自住/出租/空置/装修)、物业类型(住宅/商铺/车位)。<br/>
           同小区同楼栋同房号自动更新（不会重复新增）。
         </p>
-        <a href="/templates/property-import-template.xlsx" download style="color: #1a4f9e; font-size: 14px">⬇️ 下载 Excel 模板</a>
+        <button style="color: #1a4f9e; background: none; border: none; cursor: pointer; font-size: 14px; padding: 0" @click="downloadTemplate">⬇️ 下载 Excel 模板</button>
         <div style="margin: 16px 0">
           <input type="file" accept=".xlsx,.xls" @change="onFileChange" style="font-size: 14px" />
         </div>
@@ -187,7 +187,7 @@ async function saveProperty() {
       await axios.put(`${API_BASE}/properties/${editing.value.metadata.name}`, {
         apiVersion: 'propertyfee.halo.run/v1alpha1',
         kind: 'Property',
-        metadata: { name: editing.value.metadata.name },
+        metadata: { name: editing.value.metadata.name, version: editing.value.metadata.version },
         spec: { ...newProp.value },
       })
     } else {
@@ -261,6 +261,28 @@ function loadXlsx(): Promise<any> {
     xlsxPromise = import('xlsx')
   }
   return xlsxPromise
+}
+
+// 前端生成 Excel 模板并下载（不依赖后端静态资源）
+async function downloadTemplate() {
+  try {
+    const XLSX = await loadXlsx()
+    const header = [
+      '小区', '楼栋', '单元', '房号', '面积(㎡)', '业主姓名', '手机号',
+      '身份证号', '业主类型', '入住日期', '房屋状态', '物业类型', '备注',
+    ]
+    const example = [
+      '阳光花园', '1', '1', '101', 89.5, '张三', '13800000001',
+      '532621198001010011', '业主', '2024-06-01', '自住', '住宅', '',
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([header, example])
+    ws['!cols'] = header.map((h) => ({ wch: h.length >= 8 ? h.length * 2.2 : 12 }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '房屋导入模板')
+    XLSX.writeFile(wb, 'property-import-template.xlsx')
+  } catch (e: any) {
+    alert('模板生成失败: ' + (e?.message || e))
+  }
 }
 
 async function remove(p: any) {

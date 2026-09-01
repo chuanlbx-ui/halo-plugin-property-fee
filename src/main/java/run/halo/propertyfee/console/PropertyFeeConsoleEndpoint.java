@@ -140,10 +140,15 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> updateProperty(ServerRequest request) {
         String name = request.pathVariable("name");
         return request.bodyToMono(Property.class)
-            .flatMap(p -> {
-                p.getMetadata().setName(name);
-                return client.update(p);
-            })
+            .flatMap(p -> client.fetch(Property.class, name)
+                .flatMap(existing -> {
+                    p.getMetadata().setName(name);
+                    // Halo 乐观锁：version 为空时自动补旧值，防止 update 退化为 create
+                    if (p.getMetadata().getVersion() == null) {
+                        p.getMetadata().setVersion(existing.getMetadata().getVersion());
+                    }
+                    return client.update(p);
+                }))
             .flatMap(p -> ServerResponse.ok().bodyValue(p))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
@@ -301,10 +306,14 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> updateStandard(ServerRequest request) {
         String name = request.pathVariable("name");
         return request.bodyToMono(FeeStandard.class)
-            .flatMap(fs -> {
-                fs.getMetadata().setName(name);
-                return client.update(fs);
-            })
+            .flatMap(fs -> client.fetch(FeeStandard.class, name)
+                .flatMap(existing -> {
+                    fs.getMetadata().setName(name);
+                    if (fs.getMetadata().getVersion() == null) {
+                        fs.getMetadata().setVersion(existing.getMetadata().getVersion());
+                    }
+                    return client.update(fs);
+                }))
             .flatMap(fs -> ServerResponse.ok().bodyValue(fs))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
@@ -349,10 +358,14 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> updateConfig(ServerRequest request) {
         String name = request.pathVariable("name");
         return request.bodyToMono(PaymentConfig.class)
-            .flatMap(pc -> {
-                pc.getMetadata().setName(name);
-                return client.update(pc);
-            })
+            .flatMap(pc -> client.fetch(PaymentConfig.class, name)
+                .flatMap(existing -> {
+                    pc.getMetadata().setName(name);
+                    if (pc.getMetadata().getVersion() == null) {
+                        pc.getMetadata().setVersion(existing.getMetadata().getVersion());
+                    }
+                    return client.update(pc);
+                }))
             .flatMap(pc -> ServerResponse.ok().bodyValue(pc))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
