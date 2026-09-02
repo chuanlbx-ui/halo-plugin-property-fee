@@ -14,8 +14,10 @@ spec:
     website: https://aiedu.yn.cn
   logo: logo.png
   homepage: https://aiedu.yn.cn
+  repo: https://github.com/chuanlbx-ui/halo-plugin-property-fee
+  issues: https://github.com/chuanlbx-ui/halo-plugin-property-fee/issues
   displayName: "物业费收缴管理"
-  description: "物业费收缴管理插件：房屋资料Excel导入、按小区/楼栋/房号查费、多商户号微信支付、缴费报表与收缴率看板。"
+  description: "物业费收缴管理插件：房屋资料Excel导入、按小区/楼栋/房号查费、多商户号微信支付、缴费报表与收缴率看板。适合物业公司/业委会线上收缴物业费。"
   license:
     - name: "GPL-3.0"
-      url: "https://github.com/halo-dev/plugin-starter/blob/main/LICENSE"
+      url: "https://github.com/chuanlbx-ui/halo-plugin-property-fee/blob/main/LICENSE"
