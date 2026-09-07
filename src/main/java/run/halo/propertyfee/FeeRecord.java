@@ -87,6 +87,9 @@ public class FeeRecord extends AbstractExtension {
         /** 业主手机号（快照）。 */
         private String ownerPhone;
 
+        /** 实际缴费人手机号（V4 业主登录后缴费，防代缴错缴；线下/物业登记为空）。 */
+        private String payerPhone;
+
         /** 备注（线下收款登记/支付渠道名等）。 */
         private String remark;
     }

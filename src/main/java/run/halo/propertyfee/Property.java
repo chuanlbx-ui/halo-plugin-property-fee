@@ -1,6 +1,8 @@
 package run.halo.propertyfee;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import run.halo.app.extension.AbstractExtension;
@@ -46,10 +48,10 @@ public class Property extends AbstractExtension {
         /** 物业类型：住宅 / 商铺 / 车位 / 其他（默认住宅）。 */
         private String propertyType = "住宅";
 
-        /** 业主姓名。 */
+        /** 业主姓名（主业主，兼容保留：优先从 owners 取主业主）。 */
         private String ownerName;
 
-        /** 业主手机号（用于查费/缴费身份识别）。 */
+        /** 业主手机号（主业主，用于查费/缴费身份识别）。 */
         private String ownerPhone;
 
         /** 业主身份证号（选填）。 */
@@ -57,6 +59,9 @@ public class Property extends AbstractExtension {
 
         /** 业主类型：业主 / 租户 / 亲属（默认业主）。 */
         private String ownerType = "业主";
+
+        /** 同一房屋多业主档案（V4）。录入/导入时与单业主字段双写，老逻辑零改动。 */
+        private List<Owner> owners = new ArrayList<>();
 
         /** 入住日期（yyyy-MM-dd，选填）。 */
         private String moveInDate;
@@ -66,5 +71,17 @@ public class Property extends AbstractExtension {
 
         /** 备注。 */
         private String remark;
+    }
+
+    /** 业主档案（一房可多人：业主 / 共有人 / 租户 / 亲属）。 */
+    @Data
+    public static class Owner {
+        private String name;
+        private String phone;
+        private String idCard;
+        /** 业主 / 共有人 / 租户 / 亲属。 */
+        private String type = "业主";
+        /** 是否主业主（默认真）。 */
+        private Boolean isPrimary = false;
     }
 }

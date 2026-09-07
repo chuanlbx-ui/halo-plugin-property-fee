@@ -28,6 +28,10 @@ import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
+import run.halo.propertyfee.Community;
+import run.halo.propertyfee.Property;
+import run.halo.propertyfee.PropertyHelper;
+import run.halo.propertyfee.PropertyImportRequest;
 import run.halo.propertyfee.FeeRecord;
 import run.halo.propertyfee.FeeStandard;
 import run.halo.propertyfee.PaymentConfig;
@@ -61,6 +65,19 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                     .implementation(String.class)))
             .DELETE("properties/{name}", this::deleteProperty, builder -> builder
                 .operationId("DeleteProperty").description("Delete property.").tag(tag)
+                .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
+                    .implementation(String.class)))
+            // ===== 小区配置 CRUD =====
+            .GET("communities", this::listCommunities, builder -> builder
+                .operationId("ListCommunities").description("List community configs.").tag(tag))
+            .POST("communities", this::createCommunity, builder -> builder
+                .operationId("CreateCommunity").description("Create community config.").tag(tag))
+            .PUT("communities/{name}", this::updateCommunity, builder -> builder
+                .operationId("UpdateCommunity").description("Update community config.").tag(tag)
+                .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
+                    .implementation(String.class)))
+            .DELETE("communities/{name}", this::deleteCommunity, builder -> builder
+                .operationId("DeleteCommunity").description("Delete community config.").tag(tag)
                 .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
                     .implementation(String.class)))
             // ===== 房屋批量导入 =====
@@ -127,11 +144,18 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> createProperty(ServerRequest request) {
         return request.bodyToMono(Property.class)
             .flatMap(p -> {
-                if (p.getSpec() == null || p.getSpec().getCommunity() == null
-                    || p.getSpec().getCommunity().isBlank()) {
+                if (p.getSpec() == null || !hasText(p.getSpec().getCommunity())) {
                     return Mono.error(new PropertyFeeException("小区名称不能为空"));
                 }
-                return client.create(p);
+                Property.PropertySpec s = p.getSpec();
+                if (!hasText(s.getBuilding()) || !hasText(s.getRoom())) {
+                    return Mono.error(new PropertyFeeException("楼栋/房号不能为空"));
+                }
+                // 多业主：主业主同步回单字段（兼容报表/Excel/老逻辑）
+                PropertyHelper.syncPrimaryFields(s);
+                // 小区/楼栋必须在配置内（配置化管控，避免手填不准）
+                return validateCommunityBuilding(s)
+                    .then(client.create(p));
             })
             .flatMap(p -> ServerResponse.ok().bodyValue(p))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
@@ -140,6 +164,17 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> updateProperty(ServerRequest request) {
         String name = request.pathVariable("name");
         return request.bodyToMono(Property.class)
+            .flatMap(p -> {
+                Property.PropertySpec s = p.getSpec();
+                if (s == null || !hasText(s.getCommunity())) {
+                    return Mono.error(new PropertyFeeException("小区名称不能为空"));
+                }
+                if (!hasText(s.getBuilding()) || !hasText(s.getRoom())) {
+                    return Mono.error(new PropertyFeeException("楼栋/房号不能为空"));
+                }
+                PropertyHelper.syncPrimaryFields(s);
+                return validateCommunityBuilding(s).thenReturn(p);
+            })
             .flatMap(p -> client.fetch(Property.class, name)
                 .flatMap(existing -> {
                     p.getMetadata().setName(name);
@@ -192,31 +227,14 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                         String k = keyOf(row.community(), row.building(), row.room());
                         Property existingP = byKey.get(k);
                         if (existingP != null) {
-                            // 更新面积/业主信息
+                            // 更新面积/业主信息（多业主：每行业主追加进 owners，主业主同步单字段）
                             var s = existingP.getSpec();
                             boolean changed = false;
                             if (row.area() != null && !row.area().equals(s.getArea())) {
                                 s.setArea(row.area());
                                 changed = true;
                             }
-                            if (row.ownerName() != null && !row.ownerName().isBlank()
-                                && !row.ownerName().equals(s.getOwnerName())) {
-                                s.setOwnerName(row.ownerName());
-                                changed = true;
-                            }
-                            if (row.ownerPhone() != null && !row.ownerPhone().isBlank()
-                                && !row.ownerPhone().equals(s.getOwnerPhone())) {
-                                s.setOwnerPhone(row.ownerPhone());
-                                changed = true;
-                            }
-                            if (row.ownerIdCard() != null && !row.ownerIdCard().isBlank()
-                                && !row.ownerIdCard().equals(s.getOwnerIdCard())) {
-                                s.setOwnerIdCard(row.ownerIdCard());
-                                changed = true;
-                            }
-                            if (row.ownerType() != null && !row.ownerType().isBlank()
-                                && !row.ownerType().equals(s.getOwnerType())) {
-                                s.setOwnerType(row.ownerType());
+                            if (appendImportOwner(s, row)) {
                                 changed = true;
                             }
                             if (row.moveInDate() != null && !row.moveInDate().isBlank()
@@ -262,6 +280,8 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                             spec.setPropertyType(row.propertyType() == null || row.propertyType().isBlank()
                                 ? "住宅" : row.propertyType());
                             p.setSpec(spec);
+                            appendImportOwner(spec, row);
+                            PropertyHelper.syncPrimaryFields(spec);
                             ops.add(client.create(p));
                             created++;
                         }
@@ -485,6 +505,118 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private static String keyOf(String community, String building, String room) {
         return community + "|" + building + "|" + room;
+    }
+
+    // ============ 小区配置 ============
+
+    private Mono<ServerResponse> listCommunities(ServerRequest request) {
+        return listAll(Community.class)
+            .map(list -> new ListResult<>(list))
+            .flatMap(r -> ServerResponse.ok().bodyValue(r))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private Mono<ServerResponse> createCommunity(ServerRequest request) {
+        return request.bodyToMono(Community.class)
+            .flatMap(c -> {
+                if (c.getSpec() == null || !hasText(c.getSpec().getName())) {
+                    return Mono.error(new PropertyFeeException("小区名称不能为空"));
+                }
+                return listAll(Community.class).flatMap(existing -> {
+                    boolean dup = existing.stream().anyMatch(e ->
+                        e.getSpec() != null && e.getSpec().getName().equals(c.getSpec().getName()));
+                    if (dup) {
+                        return Mono.error(new PropertyFeeException("小区已存在，请勿重复添加"));
+                    }
+                    return client.create(c);
+                });
+            })
+            .flatMap(c -> ServerResponse.ok().bodyValue(c))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private Mono<ServerResponse> updateCommunity(ServerRequest request) {
+        String name = request.pathVariable("name");
+        return request.bodyToMono(Community.class)
+            .flatMap(c -> client.fetch(Community.class, name)
+                .flatMap(existing -> {
+                    c.getMetadata().setName(name);
+                    if (c.getMetadata().getVersion() == null) {
+                        c.getMetadata().setVersion(existing.getMetadata().getVersion());
+                    }
+                    return client.update(c);
+                }))
+            .flatMap(c -> ServerResponse.ok().bodyValue(c))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private Mono<ServerResponse> deleteCommunity(ServerRequest request) {
+        String name = request.pathVariable("name");
+        return client.fetch(Community.class, name)
+            .flatMap(c -> client.delete(c))
+            .then(ServerResponse.noContent().build())
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /**
+     * 校验房屋的小区/楼栋：小区必须在配置中；楼栋必须属于该小区配置的楼栋列表。
+     * 未建任何小区配置时放行（兼容老数据，配置建成后即强校验）。
+     */
+    private Mono<Void> validateCommunityBuilding(Property.PropertySpec spec) {
+        return listAll(Community.class).flatMap(all -> {
+            if (all.isEmpty()) {
+                return Mono.empty();
+            }
+            Community matched = all.stream()
+                .filter(c -> c.getSpec() != null
+                    && c.getSpec().getName().equals(spec.getCommunity()))
+                .findFirst().orElse(null);
+            if (matched == null) {
+                return Mono.error(new PropertyFeeException(
+                    "小区「" + spec.getCommunity() + "」不在配置中，请先在「小区配置」中添加"));
+            }
+            List<String> buildings = matched.getSpec().getBuildings();
+            if (buildings != null && !buildings.isEmpty()
+                && buildings.stream().noneMatch(b -> b.equals(spec.getBuilding()))) {
+                return Mono.error(new PropertyFeeException(
+                    "楼栋「" + spec.getBuilding() + "」不在小区「" + matched.getSpec().getName()
+                        + "」的配置中，请先在小区配置里补充该楼栋"));
+            }
+            return Mono.empty();
+        });
+    }
+
+    /**
+     * 导入行业主并入房屋业主列表：同房多行 = 多业主；同手机号去重；
+     * 首个业主自动成为主业主并同步单字段（在调用方 syncPrimaryFields 后落库）。
+     */
+    private static boolean appendImportOwner(Property.PropertySpec spec,
+                                             PropertyImportRequest.ImportRow row) {
+        String name = row.ownerName();
+        String phone = PropertyHelper.normalizePhone(row.ownerPhone());
+        if ((name == null || name.isBlank()) && phone == null) {
+            return false;
+        }
+        if (spec.getOwners() == null) {
+            spec.setOwners(new java.util.ArrayList<>());
+        }
+        boolean exists = spec.getOwners().stream().anyMatch(o ->
+            o.getPhone() != null && o.getPhone().equals(phone));
+        if (exists) {
+            return false;
+        }
+        Property.Owner o = new Property.Owner();
+        o.setName(name);
+        o.setPhone(phone);
+        o.setIdCard(row.ownerIdCard());
+        o.setType(row.ownerType() == null || row.ownerType().isBlank() ? "业主" : row.ownerType());
+        o.setIsPrimary(spec.getOwners().isEmpty());
+        spec.getOwners().add(o);
+        return true;
+    }
+
+    private static boolean hasText(String s) {
+        return s != null && !s.isBlank();
     }
 
     private Mono<ServerResponse> badRequest(String message) {

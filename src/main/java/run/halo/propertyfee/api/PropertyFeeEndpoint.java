@@ -35,10 +35,12 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.propertyfee.FeeQueryRequest;
 import run.halo.propertyfee.FeeRecord;
 import run.halo.propertyfee.FeeStandard;
+import run.halo.propertyfee.OwnerAuthService;
 import run.halo.propertyfee.PayOrderRequest;
 import run.halo.propertyfee.PaymentConfig;
 import run.halo.propertyfee.Property;
 import run.halo.propertyfee.PropertyFeeException;
+import run.halo.propertyfee.PropertyHelper;
 import run.halo.propertyfee.WechatPayService;
 
 /**
@@ -52,6 +54,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
 
     private final ReactiveExtensionClient client;
     private final WechatPayService wechatPayService;
+    private final OwnerAuthService ownerAuthService;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -100,6 +103,27 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             // 小区/楼栋/房号数据（前台下拉联动）
             .GET("properties/options", this::queryOptions, builder -> builder
                 .operationId("QueryPropertyOptions").description("List communities/buildings/rooms for dropdowns.")
+                .tag(tag)
+                .response(responseBuilder().implementation(Map.class)))
+            // 业主登录：发送短信验证码
+            .POST("auth/send-code", this::sendCode, builder -> builder
+                .operationId("OwnerSendCode").description("Send SMS verify code to owner phone.")
+                .tag(tag)
+                .requestBody(requestBodyBuilder().required(true)
+                    .content(contentBuilder().mediaType(MediaType.APPLICATION_JSON_VALUE)
+                        .schema(schemaBuilder().implementation(Map.class))))
+                .response(responseBuilder().implementation(Map.class)))
+            // 业主登录：手机号+验证码换 Token
+            .POST("auth/login", this::ownerLogin, builder -> builder
+                .operationId("OwnerLogin").description("Login owner by phone + verify code, return token.")
+                .tag(tag)
+                .requestBody(requestBodyBuilder().required(true)
+                    .content(contentBuilder().mediaType(MediaType.APPLICATION_JSON_VALUE)
+                        .schema(schemaBuilder().implementation(Map.class))))
+                .response(responseBuilder().implementation(Map.class)))
+            // 名下房屋（业主登录后）
+            .GET("owner/houses", this::ownerHouses, builder -> builder
+                .operationId("OwnerHouses").description("List houses of logged-in owner.")
                 .tag(tag)
                 .response(responseBuilder().implementation(Map.class)))
             .build();
@@ -292,6 +316,14 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         // Halo 2.26 运行时对部分 JSON body（特定长度/内容组合）存在 bodyToMono 返回
         // empty 的竞态（报"请求体不能为空"，与 record/Map 类型无关，实测稳定复现）。
         // 方案：body 为空时自动回退读取 query 参数，保证下单链路可用。
+        // V4 业主守卫：在线缴费必须携带业主登录凭证（X-Owner-Token），防止缴错/代缴。
+        String payerPhone;
+        try {
+            payerPhone = ownerAuthService.verifyToken(request.headers().firstHeader("X-Owner-Token"));
+        } catch (PropertyFeeException e) {
+            return badRequest("请先登录业主账号（微信/手机验证码）后再缴费");
+        }
+        String ownerPhone = payerPhone;
         return request.bodyToMono(Map.class)
             .defaultIfEmpty(new java.util.HashMap<>())
             .flatMap(m -> {
@@ -299,7 +331,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 // 对部分 JSON body 存在解析竞态返回 empty/空 Map）
                 Map<String, Object> merged = new java.util.HashMap<>((Map<String, Object>) m);
                 merged.putAll(fromQueryParams(request));
-                return doCreatePayOrder(toPayOrderRequest(merged));
+                return doCreatePayOrder(toPayOrderRequest(merged), ownerPhone);
             })
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
@@ -336,7 +368,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             m.get("remark") == null ? null : String.valueOf(m.get("remark")));
     }
 
-    private Mono<Map<String, Object>> doCreatePayOrder(PayOrderRequest req) {
+    private Mono<Map<String, Object>> doCreatePayOrder(PayOrderRequest req, String payerPhone) {
         if (req.community() == null || req.community().isBlank()
             || req.building() == null || req.building().isBlank()
             || req.room() == null || req.room().isBlank()) {
@@ -345,65 +377,75 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         int year = req.year() == null ? java.time.Year.now().getValue() : req.year();
         String payType = req.payType() == null ? "native" : req.payType();
         return findProperty(req.community(), req.building(), req.room())
-            .flatMap(property -> findStandard(req.community(), property.getSpec() == null
-                    ? null : property.getSpec().getPropertyType(), year)
-                .flatMap(standard -> wechatPayService.getConfig(req.community(), payType,
-                        req.payChannel())
-                    .flatMap(pc -> {
-                        return calcFeeAmount(property, standard).flatMap(calc -> {
-                            if (calc.paid) {
-                                return Mono.error(new PropertyFeeException("该房号 " + year
-                                    + " 年物业费已缴纳，无需重复缴费"));
-                            }
-                            // 生成订单号
-                            String outTradeNo = "PF" + System.currentTimeMillis()
-                                + (int) (Math.random() * 900 + 100);
-                            long totalFen = Math.round(calc.totalAmount * 100);
-
-                            // 写入 FeeRecord（PENDING）
-                            FeeRecord rec = new FeeRecord();
-                            Metadata meta = new Metadata();
-                            meta.setName(outTradeNo);
-                            rec.setMetadata(meta);
-                            FeeRecord.FeeRecordSpec spec = new FeeRecord.FeeRecordSpec();
-                            spec.setCommunity(req.community());
-                            spec.setBuilding(req.building());
-                            spec.setRoom(req.room());
-                            spec.setPropertyName(property.getMetadata().getName());
-                            spec.setYear(year);
-                            spec.setArea(calc.area);
-                            spec.setPropertyFee(round2(calc.propertyFee));
-                            spec.setExtraFee(round2(calc.extraFeeTotal));
-                            spec.setTotalAmount(round2(calc.totalAmount));
-                            spec.setPaidAmount(round2(calc.totalAmount));
-                            spec.setStatus("PENDING");
-                            spec.setMchId(pc.getSpec().getMchId());
-                            spec.setOutTradeNo(outTradeNo);
-                            spec.setPayType(payType);
-                            spec.setCreatedAt(Instant.now());
-                            spec.setOwnerName(property.getSpec().getOwnerName());
-                            spec.setOwnerPhone(property.getSpec().getOwnerPhone());
-                            rec.setSpec(spec);
-
-                            // 线下渠道：直接标记 PAID + 备注（管理员确认收款后）
-                            if ("offline".equals(payType)) {
-                                spec.setStatus("PAID");
-                                spec.setPaidAt(Instant.now());
-                                spec.setTransactionId("OFFLINE-" + outTradeNo);
-                                if (req.remark() != null && !req.remark().isBlank()) {
-                                    spec.setRemark(req.remark());
+            .flatMap(property -> {
+                // V4 业主守卫：登录手机号必须属于该房屋登记业主（多业主任一命中）
+                if (payerPhone != null && !payerPhone.isBlank()
+                    && !PropertyHelper.isOwnerPhone(property, payerPhone)) {
+                    return Mono.error(new PropertyFeeException(
+                        "您不是该房屋「" + req.community() + " " + req.building() + " "
+                            + req.room() + "」的登记业主，不能为其缴费。如有疑问请联系物业核对业主档案"));
+                }
+                return findStandard(req.community(), property.getSpec() == null
+                        ? null : property.getSpec().getPropertyType(), year)
+                    .flatMap(standard -> wechatPayService.getConfig(req.community(), payType,
+                            req.payChannel())
+                        .flatMap(pc -> {
+                            return calcFeeAmount(property, standard).flatMap(calc -> {
+                                if (calc.paid) {
+                                    return Mono.error(new PropertyFeeException("该房号 " + year
+                                        + " 年物业费已缴纳，无需重复缴费"));
                                 }
-                                return client.create(rec)
-                                    .thenReturn(Map.of(
-                                        "outTradeNo", outTradeNo,
-                                        "totalAmount", round2(calc.totalAmount),
-                                        "payType", "offline",
-                                        "status", "PAID",
-                                        "message", "线下收款已登记，缴费完成"));
-                            }
-                            return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req));
-                        });
-                    })));
+                                // 生成订单号
+                                String outTradeNo = "PF" + System.currentTimeMillis()
+                                    + (int) (Math.random() * 900 + 100);
+                                long totalFen = Math.round(calc.totalAmount * 100);
+
+                                // 写入 FeeRecord（PENDING）
+                                FeeRecord rec = new FeeRecord();
+                                Metadata meta = new Metadata();
+                                meta.setName(outTradeNo);
+                                rec.setMetadata(meta);
+                                FeeRecord.FeeRecordSpec spec = new FeeRecord.FeeRecordSpec();
+                                spec.setCommunity(req.community());
+                                spec.setBuilding(req.building());
+                                spec.setRoom(req.room());
+                                spec.setPropertyName(property.getMetadata().getName());
+                                spec.setYear(year);
+                                spec.setArea(calc.area);
+                                spec.setPropertyFee(round2(calc.propertyFee));
+                                spec.setExtraFee(round2(calc.extraFeeTotal));
+                                spec.setTotalAmount(round2(calc.totalAmount));
+                                spec.setPaidAmount(round2(calc.totalAmount));
+                                spec.setStatus("PENDING");
+                                spec.setMchId(pc.getSpec().getMchId());
+                                spec.setOutTradeNo(outTradeNo);
+                                spec.setPayType(payType);
+                                spec.setCreatedAt(Instant.now());
+                                spec.setOwnerName(property.getSpec().getOwnerName());
+                                spec.setOwnerPhone(property.getSpec().getOwnerPhone());
+                                spec.setPayerPhone(payerPhone);
+                                rec.setSpec(spec);
+
+                                // 线下渠道：直接标记 PAID + 备注（管理员确认收款后）
+                                if ("offline".equals(payType)) {
+                                    spec.setStatus("PAID");
+                                    spec.setPaidAt(Instant.now());
+                                    spec.setTransactionId("OFFLINE-" + outTradeNo);
+                                    if (req.remark() != null && !req.remark().isBlank()) {
+                                        spec.setRemark(req.remark());
+                                    }
+                                    return client.create(rec)
+                                        .thenReturn(Map.of(
+                                            "outTradeNo", outTradeNo,
+                                            "totalAmount", round2(calc.totalAmount),
+                                            "payType", "offline",
+                                            "status", "PAID",
+                                            "message", "线下收款已登记，缴费完成"));
+                                }
+                                return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req));
+                            });
+                        }));
+            });
     }
 
     private Mono<Map<String, Object>> createWxOrder(PaymentConfig pc, FeeCalc calc,
@@ -584,7 +626,125 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 
+    // ============ 业主登录（V4：手机号+短信验证码；后续微信 OAuth 绑定复用同一 Token 体系） ============
+
+    private Mono<ServerResponse> sendCode(ServerRequest request) {
+        return request.bodyToMono(Map.class)
+            .defaultIfEmpty(Map.of())
+            .flatMap(m -> {
+                String phone = m.get("phone") == null ? null : String.valueOf(m.get("phone"));
+                if (phone == null || phone.isBlank()) {
+                    return Mono.error(new PropertyFeeException("手机号不能为空"));
+                }
+                // 必须是登记业主手机号（任一房屋 owners/单业主字段命中）
+                return listAll(Property.class).flatMap(all -> {
+                    boolean isOwner = all.stream()
+                        .anyMatch(p -> PropertyHelper.isOwnerPhone(p,
+                            PropertyHelper.normalizePhone(phone)));
+                    if (!isOwner) {
+                        return Mono.error(new PropertyFeeException(
+                            "该手机号未登记为业主，请联系物业核对业主档案"));
+                    }
+                    boolean sent = ownerAuthService.sendCode(PropertyHelper.normalizePhone(phone));
+                    return ServerResponse.ok().bodyValue(Map.of(
+                        "success", sent,
+                        "hint", "验证码已发送（开发模式万能码 123456，正式短信通道待配置）"));
+                });
+            })
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private Mono<ServerResponse> ownerLogin(ServerRequest request) {
+        return request.bodyToMono(Map.class)
+            .defaultIfEmpty(Map.of())
+            .flatMap(m -> {
+                String phone = m.get("phone") == null ? null : String.valueOf(m.get("phone"));
+                String code = m.get("code") == null ? null : String.valueOf(m.get("code"));
+                String token = ownerAuthService.login(phone, code);
+                String norm = PropertyHelper.normalizePhone(phone);
+                return listAll(Property.class).flatMap(all -> {
+                    List<Map<String, Object>> houses = new ArrayList<>();
+                    for (Property p : all) {
+                        if (PropertyHelper.isOwnerPhone(p, norm)) {
+                            var s = p.getSpec();
+                            Map<String, Object> h = new java.util.HashMap<>();
+                            if (s != null) {
+                                h.put("community", s.getCommunity());
+                                h.put("building", s.getBuilding());
+                                h.put("room", s.getRoom());
+                                h.put("propertyType", s.getPropertyType());
+                                h.put("area", s.getArea());
+                                h.put("owners", ownerSummaries(p));
+                            }
+                            houses.add(h);
+                        }
+                    }
+                    return ServerResponse.ok().bodyValue(Map.of(
+                        "token", token, "phone", norm,
+                        "houses", houses, "houseCount", houses.size()));
+                });
+            })
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private Mono<ServerResponse> ownerHouses(ServerRequest request) {
+        String phone;
+        try {
+            phone = ownerAuthService.verifyToken(
+                request.headers().firstHeader("X-Owner-Token"));
+        } catch (PropertyFeeException e) {
+            return badRequest(e.getMessage());
+        }
+        String norm = PropertyHelper.normalizePhone(phone);
+        return listAll(Property.class).flatMap(all -> {
+            List<Map<String, Object>> houses = new ArrayList<>();
+            for (Property p : all) {
+                if (PropertyHelper.isOwnerPhone(p, norm)) {
+                    var s = p.getSpec();
+                    Map<String, Object> h = new java.util.HashMap<>();
+                    if (s != null) {
+                        h.put("community", s.getCommunity());
+                        h.put("building", s.getBuilding());
+                        h.put("room", s.getRoom());
+                        h.put("propertyType", s.getPropertyType());
+                        h.put("area", s.getArea());
+                        h.put("ownerName", s.getOwnerName());
+                        h.put("owners", ownerSummaries(p));
+                    }
+                    houses.add(h);
+                }
+            }
+            return ServerResponse.ok().bodyValue(Map.of(
+                "phone", norm, "houses", houses, "houseCount", houses.size()));
+        }).onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 业主列表摘要（脱敏手机号用于展示，如 138****8000）。 */
+    private static List<Map<String, Object>> ownerSummaries(Property p) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (p.getSpec() == null) {
+            return out;
+        }
+        for (Property.Owner o : PropertyHelper.effectiveOwners(p.getSpec())) {
+            Map<String, Object> m = new java.util.HashMap<>();
+            m.put("name", o.getName());
+            String ph = PropertyHelper.normalizePhone(o.getPhone());
+            m.put("phone", ph == null ? null
+                : (ph.length() == 11 ? ph.substring(0, 3) + "****" + ph.substring(7) : ph));
+            m.put("type", o.getType());
+            m.put("isPrimary", Boolean.TRUE.equals(o.getIsPrimary()));
+            out.add(m);
+        }
+        return out;
+    }
+
     // ============ 工具 ============
+
+    private <E extends run.halo.app.extension.Extension> Mono<List<E>> listAll(Class<E> clazz) {
+        return client.listAll(clazz, ListOptions.builder().build(),
+                org.springframework.data.domain.Sort.unsorted())
+            .collectList();
+    }
 
     private Map<String, Object> toPropertyMap(Property p) {
         var s = p.getSpec();
