@@ -52,6 +52,11 @@ public class OwnerAuthService {
         }
     }
 
+    /** 是否开发模式（未接入真实短信通道）。 */
+    public boolean isDevMode() {
+        return smsProvider instanceof DevSmsProvider;
+    }
+
     /** 发送验证码；手机号不属于任何业主时返回 false。 */
     public boolean sendCode(String rawPhone) {
         String phone = PropertyHelper.normalizePhone(rawPhone);

@@ -50,6 +50,23 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private final ReactiveExtensionClient client;
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** Halo 2.26 对较长 JSON body 的 bodyToMono(对象) 存在空竞态（静默 200 空/不落库）。
+     *  统一先读原始字符串再手动反序列化，规避框架解码 bug（与前台 pay 同源问题）。 */
+    private static <T> Mono<T> parseBody(ServerRequest request, Class<T> clazz) {
+        return parseBody(request, String.class)
+            .defaultIfEmpty("{}")
+            .map(raw -> {
+                try {
+                    return MAPPER.readValue(raw, clazz);
+                } catch (Exception e) {
+                    throw new PropertyFeeException("请求体解析失败，请重试");
+                }
+            });
+    }
+
     @Override
     public RouterFunction<ServerResponse> endpoint() {
         final var tag = "console.api.propertyfee.halo.run/v1alpha1/PropertyFee";
@@ -142,7 +159,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     }
 
     private Mono<ServerResponse> createProperty(ServerRequest request) {
-        return request.bodyToMono(Property.class)
+        return parseBody(request, Property.class)
             .flatMap(p -> {
                 if (p.getSpec() == null || !hasText(p.getSpec().getCommunity())) {
                     return Mono.error(new PropertyFeeException("小区名称不能为空"));
@@ -163,7 +180,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> updateProperty(ServerRequest request) {
         String name = request.pathVariable("name");
-        return request.bodyToMono(Property.class)
+        return parseBody(request, Property.class)
             .flatMap(p -> {
                 Property.PropertySpec s = p.getSpec();
                 if (s == null || !hasText(s.getCommunity())) {
@@ -199,7 +216,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     // ============ 批量导入 ============
 
     private Mono<ServerResponse> importProperties(ServerRequest request) {
-        return request.bodyToMono(PropertyImportRequest.class)
+        return parseBody(request, PropertyImportRequest.class)
             .switchIfEmpty(Mono.error(new PropertyFeeException("导入数据不能为空")))
             .flatMap(imp -> {
                 if (imp.rows() == null || imp.rows().isEmpty()) {
@@ -305,7 +322,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     }
 
     private Mono<ServerResponse> createStandard(ServerRequest request) {
-        return request.bodyToMono(FeeStandard.class)
+        return parseBody(request, FeeStandard.class)
             .flatMap(fs -> {
                 if (fs.getSpec() == null || fs.getSpec().getCommunity() == null
                     || fs.getSpec().getCommunity().isBlank()) {
@@ -325,7 +342,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> updateStandard(ServerRequest request) {
         String name = request.pathVariable("name");
-        return request.bodyToMono(FeeStandard.class)
+        return parseBody(request, FeeStandard.class)
             .flatMap(fs -> client.fetch(FeeStandard.class, name)
                 .flatMap(existing -> {
                     fs.getMetadata().setName(name);
@@ -356,7 +373,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     }
 
     private Mono<ServerResponse> createConfig(ServerRequest request) {
-        return request.bodyToMono(PaymentConfig.class)
+        return parseBody(request, PaymentConfig.class)
             .flatMap(pc -> {
                 if (pc.getSpec() == null || pc.getSpec().getCommunity() == null
                     || pc.getSpec().getCommunity().isBlank()) {
@@ -377,7 +394,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> updateConfig(ServerRequest request) {
         String name = request.pathVariable("name");
-        return request.bodyToMono(PaymentConfig.class)
+        return parseBody(request, PaymentConfig.class)
             .flatMap(pc -> client.fetch(PaymentConfig.class, name)
                 .flatMap(existing -> {
                     pc.getMetadata().setName(name);
@@ -517,7 +534,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     }
 
     private Mono<ServerResponse> createCommunity(ServerRequest request) {
-        return request.bodyToMono(Community.class)
+        return parseBody(request, Community.class)
             .flatMap(c -> {
                 if (c.getSpec() == null || !hasText(c.getSpec().getName())) {
                     return Mono.error(new PropertyFeeException("小区名称不能为空"));
@@ -537,7 +554,7 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> updateCommunity(ServerRequest request) {
         String name = request.pathVariable("name");
-        return request.bodyToMono(Community.class)
+        return parseBody(request, Community.class)
             .flatMap(c -> client.fetch(Community.class, name)
                 .flatMap(existing -> {
                     c.getMetadata().setName(name);

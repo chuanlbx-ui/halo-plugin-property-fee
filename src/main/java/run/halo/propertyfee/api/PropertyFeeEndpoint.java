@@ -646,9 +646,10 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                             "该手机号未登记为业主，请联系物业核对业主档案"));
                     }
                     boolean sent = ownerAuthService.sendCode(PropertyHelper.normalizePhone(phone));
+                    String tip = ownerAuthService.isDevMode()
+                        ? "验证码已发送（测试通道：万能码 123456）" : "验证码已发送，请查收短信";
                     return ServerResponse.ok().bodyValue(Map.of(
-                        "success", sent,
-                        "hint", "验证码已发送（开发模式万能码 123456，正式短信通道待配置）"));
+                        "success", sent, "message", tip));
                 });
             })
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
