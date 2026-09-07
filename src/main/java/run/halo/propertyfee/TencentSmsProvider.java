@@ -93,7 +93,8 @@ public class TencentSmsProvider {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://" + host))
                 .header("Content-Type", contentType)
-                .header("Host", host)
+                // 注意：Java HttpClient 禁止显式设置 Host（restricted header），
+                // HttpClient 会按 URI 自动携带 Host，TC3 签名文本中保留 host 行即可。
                 .header("X-TC-Action", "SendSms")
                 .header("X-TC-Version", version)
                 .header("X-TC-Timestamp", timestamp)

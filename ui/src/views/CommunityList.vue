@@ -6,7 +6,10 @@
         小区与楼栋在此统一维护：房屋录入时只能从配置中选择，避免手填不一致
       </span>
       <div style="flex: 1"></div>
-      <button style="padding: 6px 16px; background: #389e0d; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="openCreate">
+      <button style="padding: 6px 16px; background: #fff; color: #389e0d; border: 1px solid #389e0d; border-radius: 6px; cursor: pointer; margin-right: 8px" @click="downloadTpl">📥 下载导入模板</button>
+      <button style="padding: 6px 16px; background: #389e0d; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-right: 8px" :disabled="importing" @click="pickFile">{{ importing ? '导入中…' : '📊 导入 Excel' }}</button>
+      <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="onFileChange" />
+      <button style="padding: 6px 16px; background: #0a2a5e; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="openCreate">
         ＋ 新增小区
       </button>
     </div>
@@ -98,6 +101,8 @@ const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
 const list = ref<any[]>([])
 const showDialog = ref(false)
 const saving = ref(false)
+const importing = ref(false)
+const fileInput = ref<any>(null)
 const buildings = ref<string[]>([''])
 const form = ref<any>({ spec: { name: '', buildings: [], enabled: true, remark: '' } })
 
@@ -125,6 +130,53 @@ function openEdit(c: any) {
   showDialog.value = true
 }
 function close() { showDialog.value = false }
+
+// ===== Excel 导入（小区名 + 楼栋；同小区多行自动合并） =====
+let xlsxPromise: Promise<any> | null = null
+async function loadXlsx() {
+  if (!xlsxPromise) xlsxPromise = import('xlsx')
+  return xlsxPromise
+}
+function pickFile() { fileInput.value?.click() }
+function downloadTpl() {
+  import('xlsx').then(m => {
+    const ws = m.utils.aoa_to_sheet([['小区名称', '楼栋'], ['阳光花园', '1栋'], ['阳光花园', '2栋']])
+    const wb = m.utils.book_new()
+    m.utils.book_append_sheet(wb, ws, '小区楼栋')
+    m.writeFile(wb, '小区楼栋导入模板.xlsx')
+  })
+}
+async function onFileChange(e: any) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const XLSX = await loadXlsx()
+  const buf = await file.arrayBuffer()
+  const wb = XLSX.read(buf, { type: 'array' })
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+  const items: any[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || []
+    const community = String(r[0] ?? '').trim()
+    const building = String(r[1] ?? '').trim()
+    if (i === 0 && /小区|community/i.test(community)) continue // 跳过表头
+    if (!community && !building) continue
+    items.push({ community, building })
+  }
+  if (!items.length) { alert('表格为空或格式不对，请下载模板参考'); e.target.value = ''; return }
+  if (!confirm(`识别到 ${items.length} 行小区/楼栋数据，确认导入？（已存在小区将自动补充楼栋）`)) { e.target.value = ''; return }
+  importing.value = true
+  try {
+    const res = await axios.post(`${API_BASE}/communities/import`, { rows: items })
+    alert(res.data?.message || '导入完成')
+    await load()
+  } catch (err: any) {
+    alert(err.response?.data?.message || '导入失败，请检查表格格式')
+  } finally {
+    importing.value = false
+    e.target.value = ''
+  }
+}
 async function save() {
   const spec = form.value.spec
   spec.name = (spec.name || '').trim()

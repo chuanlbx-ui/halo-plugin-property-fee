@@ -29,6 +29,7 @@ import run.halo.app.extension.ListResult;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.propertyfee.Community;
+import run.halo.propertyfee.CommunityImportRequest;
 import run.halo.propertyfee.Property;
 import run.halo.propertyfee.PropertyHelper;
 import run.halo.propertyfee.PropertyImportRequest;
@@ -98,6 +99,10 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                 .operationId("DeleteCommunity").description("Delete community config.").tag(tag)
                 .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
                     .implementation(String.class)))
+            // 小区/楼栋批量导入（Excel 行：小区名、楼栋；同小区自动合并去重）
+            .POST("communities/import", this::importCommunities, builder -> builder
+                .operationId("ImportCommunities").description("Batch import communities/buildings.")
+                .tag(tag))
             // ===== 房屋批量导入 =====
             .POST("properties/import", this::importProperties, builder -> builder
                 .operationId("ImportProperties").description("Batch import properties.")
@@ -578,6 +583,93 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
         return client.fetch(Community.class, name)
             .flatMap(c -> client.delete(c))
             .then(ServerResponse.noContent().build())
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /**
+     * 小区/楼栋批量导入：Excel 行 = 小区名 + 楼栋。
+     * 已存在小区 → 楼栋合并（去重）；新小区 → 自动创建并启用。
+     */
+    private Mono<ServerResponse> importCommunities(ServerRequest request) {
+        return parseBody(request, CommunityImportRequest.class)
+            .switchIfEmpty(Mono.error(new PropertyFeeException("导入数据不能为空")))
+            .flatMap(imp -> {
+                if (imp.rows() == null || imp.rows().isEmpty()) {
+                    return Mono.error(new PropertyFeeException("导入数据为空"));
+                }
+                return listAll(Community.class).flatMap(existing -> {
+                    java.util.Map<String, Community> byName = new HashMap<>();
+                    for (Community c : existing) {
+                        if (c.getSpec() != null && c.getSpec().getName() != null) {
+                            byName.put(c.getSpec().getName(), c);
+                        }
+                    }
+                    // 聚合：小区 -> 楼栋集合（保持顺序去重）
+                    java.util.Map<String, java.util.LinkedHashSet<String>> want
+                        = new java.util.LinkedHashMap<>();
+                    int badRows = 0;
+                    for (CommunityImportRequest.ImportRow row : imp.rows()) {
+                        if (row.community() == null || row.community().isBlank()
+                            || row.building() == null || row.building().isBlank()) {
+                            badRows++;
+                            continue;
+                        }
+                        want.computeIfAbsent(row.community().trim(),
+                            k -> new java.util.LinkedHashSet<>()).add(row.building().trim());
+                    }
+                    if (want.isEmpty()) {
+                        return Mono.error(new PropertyFeeException("未识别到有效的小区/楼栋数据"));
+                    }
+                    List<Mono<Community>> ops = new ArrayList<>();
+                    int[] created = {0};
+                    int[] merged = {0};
+                    for (java.util.Map.Entry<String, java.util.LinkedHashSet<String>> e : want.entrySet()) {
+                        String cname = e.getKey();
+                        List<String> buildings = new ArrayList<>(e.getValue());
+                        Community c = byName.get(cname);
+                        if (c != null && c.getSpec() != null) {
+                            List<String> cur = c.getSpec().getBuildings();
+                            if (cur == null) {
+                                cur = new ArrayList<>();
+                                c.getSpec().setBuildings(cur);
+                            }
+                            boolean changed = false;
+                            for (String b : buildings) {
+                                if (!cur.contains(b)) {
+                                    cur.add(b);
+                                    changed = true;
+                                }
+                            }
+                            if (changed) {
+                                ops.add(client.update(c));
+                                merged[0]++;
+                            }
+                        } else {
+                            Community nc = new Community();
+                            Metadata meta = new Metadata();
+                            meta.setGenerateName("community-");
+                            nc.setMetadata(meta);
+                            Community.CommunitySpec spec = new Community.CommunitySpec();
+                            spec.setName(cname);
+                            spec.setBuildings(buildings);
+                            spec.setEnabled(true);
+                            nc.setSpec(spec);
+                            ops.add(client.create(nc));
+                            created[0]++;
+                        }
+                    }
+                    if (ops.isEmpty()) {
+                        return ServerResponse.ok().bodyValue(Map.of(
+                            "success", true, "message", "导入完成：所有楼栋均已存在，无新增",
+                            "created", 0, "merged", 0, "skipped", badRows));
+                    }
+                    return Mono.when(ops).then(ServerResponse.ok().bodyValue(Map.of(
+                        "success", true,
+                        "message", "导入完成：新增小区 " + created[0] + " 个，补充楼栋 " + merged[0] + " 个"
+                            + (badRows > 0 ? "，忽略无效行 " + badRows + " 行" : ""),
+                        "created", created[0], "merged", merged[0], "skipped", badRows)));
+                });
+            })
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 
