@@ -83,5 +83,7 @@ public class Property extends AbstractExtension {
         private String type = "业主";
         /** 是否主业主（默认真）。 */
         private Boolean isPrimary = false;
+        /** 绑定微信 openid（服务号网页授权，复用平台公众号）。首次手机验证码绑定后记录，此后微信一键登录。 */
+        private String wechatOpenid;
     }
 }

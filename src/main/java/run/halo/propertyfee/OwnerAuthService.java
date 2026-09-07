@@ -57,6 +57,26 @@ public class OwnerAuthService {
         return smsProvider instanceof DevSmsProvider;
     }
 
+    /**
+     * 签发验证码并返回明文（供真实短信通道发送）；手机号不属于业主时返回 null。
+     * 同时承担发送频率限制与验证码存储。
+     */
+    public String issueCode(String rawPhone) {
+        String phone = PropertyHelper.normalizePhone(rawPhone);
+        if (phone == null || phone.length() != 11) {
+            throw new PropertyFeeException("手机号格式不正确");
+        }
+        CodeBox box = codes.get(phone);
+        long now = Instant.now().getEpochSecond();
+        if (box != null && now - box.lastSentAt < RESEND_SECONDS) {
+            throw new PropertyFeeException("验证码发送太频繁，请稍后再试");
+        }
+        String code = String.valueOf((int) (Math.random() * 900000) + 100000);
+        codes.put(phone, new CodeBox(code, now + CODE_TTL_SECONDS, now));
+        log.info("[property-fee] 验证码已生成 phone={} code={}", phone, code);
+        return code;
+    }
+
     /** 发送验证码；手机号不属于任何业主时返回 false。 */
     public boolean sendCode(String rawPhone) {
         String phone = PropertyHelper.normalizePhone(rawPhone);
@@ -70,9 +90,18 @@ public class OwnerAuthService {
         }
         String code = String.valueOf((int) (Math.random() * 900000) + 100000);
         codes.put(phone, new CodeBox(code, now + CODE_TTL_SECONDS, now));
-        log.info("[property-fee] 验证码已生成 phone={} code={} (provider={})",
+        log.info("[property-fee] 验证码已生成 phone={} code={} (provider={})\n",
             phone, code, smsProvider.getClass().getSimpleName());
         return smsProvider.send(phone, code);
+    }
+
+    /** 直接签发业主 Token（微信 openid 命中已绑定业主等免密场景）。 */
+    public String issueTokenByPhone(String phone) {
+        String norm = PropertyHelper.normalizePhone(phone);
+        if (norm == null || norm.length() != 11) {
+            throw new PropertyFeeException("手机号无效");
+        }
+        return issueToken(norm);
     }
 
     /** 登录：验证码正确返回签名 Token，否则抛业务异常。 */

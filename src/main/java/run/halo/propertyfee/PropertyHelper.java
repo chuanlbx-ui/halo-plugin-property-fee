@@ -68,6 +68,60 @@ public final class PropertyHelper {
         return p.isEmpty() ? null : p;
     }
 
+    /**
+     * 把微信 openid 绑定到指定手机号的业主记录上（owners 优先，单业主字段兜底）。
+     *
+     * @return true=绑定成功；false=该手机号不是此房屋业主
+     */
+    public static boolean setOwnerWxOpenid(Property.PropertySpec spec, String phone, String openid) {
+        if (spec == null || phone == null || openid == null) {
+            return false;
+        }
+        String norm = normalizePhone(phone);
+        List<Property.Owner> owners = spec.getOwners();
+        if (owners != null && !owners.isEmpty()) {
+            for (Property.Owner o : owners) {
+                if (norm.equals(normalizePhone(o.getPhone()))) {
+                    o.setWechatOpenid(openid);
+                    return true;
+                }
+            }
+            return false;
+        }
+        // 老单业主字段：视为主业主
+        if (norm.equals(normalizePhone(spec.getOwnerPhone()))) {
+            Property.Owner o = new Property.Owner();
+            o.setName(spec.getOwnerName());
+            o.setPhone(spec.getOwnerPhone());
+            o.setType("业主");
+            o.setIsPrimary(true);
+            o.setWechatOpenid(openid);
+            List<Property.Owner> list = new java.util.ArrayList<>();
+            list.add(o);
+            spec.setOwners(list);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 按微信 openid 反查业主手机号（遍历房屋 owners）。未绑定返回 null。
+     */
+    public static String findOwnerPhoneByWxOpenid(Property.PropertySpec spec, String openid) {
+        if (spec == null || openid == null) {
+            return null;
+        }
+        List<Property.Owner> owners = spec.getOwners();
+        if (owners != null) {
+            for (Property.Owner o : owners) {
+                if (openid.equals(o.getWechatOpenid())) {
+                    return normalizePhone(o.getPhone());
+                }
+            }
+        }
+        return null;
+    }
+
     private static boolean hasText(String s) {
         return s != null && !s.isBlank();
     }

@@ -35,6 +35,7 @@ import run.halo.propertyfee.PropertyImportRequest;
 import run.halo.propertyfee.FeeRecord;
 import run.halo.propertyfee.FeeStandard;
 import run.halo.propertyfee.PaymentConfig;
+import run.halo.propertyfee.SystemConfig;
 import run.halo.propertyfee.Property;
 import run.halo.propertyfee.PropertyFeeException;
 import run.halo.propertyfee.PropertyImportRequest;
@@ -53,13 +54,18 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
 
-    /** Halo 2.26 对较长 JSON body 存在框架级解码 bug：对象/Map 解码偶发返回 empty，
-     *  String 解码会挂起不返回。实测 Map 解码不挂起（仅可能为空），因此统一以
-     *  Map 接收 + convertValue 转目标对象，空 map 由下游业务校验兜底报错。 */
+    /** Halo 2.26 对较长 JSON body 的对象/Map 解码存在偶发空值竞态（误报"空"/存默认值）。
+     *  以原始字符串接收再手动反序列化规避（实测 String 通道稳定）。 */
     private static <T> Mono<T> parseBody(ServerRequest request, Class<T> clazz) {
-        return request.bodyToMono(Map.class)
-            .defaultIfEmpty(Map.of())
-            .map(m -> MAPPER.convertValue(m == null ? Map.of() : m, clazz));
+        return request.bodyToMono(String.class)
+            .defaultIfEmpty("{}")
+            .map(raw -> {
+                try {
+                    return MAPPER.readValue(raw, clazz);
+                } catch (Exception e) {
+                    throw new PropertyFeeException("请求体解析失败，请重试");
+                }
+            });
     }
 
     @Override
@@ -126,6 +132,11 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                 .operationId("DeletePaymentConfig").description("Delete payment config.").tag(tag)
                 .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
                     .implementation(String.class)))
+            // ===== 系统配置（短信/微信：复用平台既有配置，后台可维护） =====
+            .GET("systemconfig", this::getSystemConfig, builder -> builder
+                .operationId("GetSystemConfig").description("Get platform system config (sms/wx).").tag(tag))
+            .PUT("systemconfig", this::updateSystemConfig, builder -> builder
+                .operationId("UpdateSystemConfig").description("Update platform system config (sms/wx).").tag(tag))
             // ===== 缴费记录 =====
             .GET("feerecords", this::listFeeRecords, builder -> builder
                 .operationId("ListFeeRecords").description("List fee records.").tag(tag))
@@ -634,5 +645,55 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> badRequest(String message) {
         return ServerResponse.status(HttpStatus.BAD_REQUEST)
             .bodyValue(Map.of("message", message));
+    }
+
+    // ===== 系统配置：短信（腾讯云，复用平台）与微信（服务号 OAuth，复用平台） =====
+
+    private Mono<ServerResponse> getSystemConfig(ServerRequest request) {
+        return client.fetch(SystemConfig.class, SystemConfig.FIXED_NAME)
+            .map(cfg -> {
+                Map<String, Object> m = new java.util.HashMap<>();
+                m.put("metadata", cfg.getMetadata());
+                m.put("spec", cfg.getSpec());
+                return m;
+            })
+            .switchIfEmpty(Mono.just(Map.of("spec", new SystemConfig.SystemConfigSpec())))
+            .flatMap(body -> ServerResponse.ok().bodyValue(body));
+    }
+
+    private Mono<ServerResponse> updateSystemConfig(ServerRequest request) {
+        // Halo 2.26 大 body 竞态：配置较长走 query 通道 ?data=<base64url(JSON)>（pay 同款方案，稳定）
+        String q = request.queryParam("data").orElse("");
+        Mono<SystemConfig.SystemConfigSpec> specMono;
+        if (hasText(q)) {
+            specMono = Mono.fromCallable(() -> {
+                try {
+                    byte[] dec = java.util.Base64.getUrlDecoder().decode(q);
+                    return MAPPER.readValue(dec, SystemConfig.SystemConfigSpec.class);
+                } catch (Exception e) {
+                    throw new PropertyFeeException("配置参数解析失败，请重试");
+                }
+            });
+        } else {
+            specMono = parseBody(request, SystemConfig.SystemConfigSpec.class);
+        }
+        return specMono
+            .flatMap(spec -> client.fetch(SystemConfig.class, SystemConfig.FIXED_NAME)
+                .map(cfg -> {
+                    cfg.setSpec(spec);
+                    return cfg;
+                })
+                .flatMap(client::update)
+                .switchIfEmpty(Mono.defer(() -> {
+                    SystemConfig cfg = new SystemConfig();
+                    var meta = new run.halo.app.extension.Metadata();
+                    meta.setName(SystemConfig.FIXED_NAME);
+                    cfg.setMetadata(meta);
+                    cfg.setSpec(spec);
+                    return client.create(cfg);
+                }))
+                .then(ServerResponse.ok().bodyValue(Map.of(
+                    "success", true, "message", "系统配置已保存"))))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 }

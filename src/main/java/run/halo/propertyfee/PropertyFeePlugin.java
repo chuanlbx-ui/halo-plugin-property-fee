@@ -27,7 +27,8 @@ public class PropertyFeePlugin extends BasePlugin {
         schemeManager.register(FeeStandard.class);
         schemeManager.register(FeeRecord.class);
         schemeManager.register(PaymentConfig.class);
-        System.out.println("[property-fee-plugin] 物业费插件启动成功，已注册 Community/Property/FeeStandard/FeeRecord/PaymentConfig Scheme");
+        schemeManager.register(SystemConfig.class);
+        System.out.println("[property-fee-plugin] 物业费插件启动成功，已注册 Community/Property/FeeStandard/FeeRecord/PaymentConfig/SystemConfig Scheme");
     }
 
     @Override
@@ -37,6 +38,7 @@ public class PropertyFeePlugin extends BasePlugin {
         schemeManager.unregister(schemeManager.get(FeeStandard.class));
         schemeManager.unregister(schemeManager.get(FeeRecord.class));
         schemeManager.unregister(schemeManager.get(PaymentConfig.class));
+        schemeManager.unregister(schemeManager.get(SystemConfig.class));
         System.out.println("[property-fee-plugin] 物业费插件已停止");
     }
 }
