@@ -53,18 +53,13 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
 
-    /** Halo 2.26 对较长 JSON body 的 bodyToMono(对象) 存在空竞态（静默 200 空/不落库）。
-     *  统一先读原始字符串再手动反序列化，规避框架解码 bug（与前台 pay 同源问题）。 */
+    /** Halo 2.26 对较长 JSON body 存在框架级解码 bug：对象/Map 解码偶发返回 empty，
+     *  String 解码会挂起不返回。实测 Map 解码不挂起（仅可能为空），因此统一以
+     *  Map 接收 + convertValue 转目标对象，空 map 由下游业务校验兜底报错。 */
     private static <T> Mono<T> parseBody(ServerRequest request, Class<T> clazz) {
-        return parseBody(request, String.class)
-            .defaultIfEmpty("{}")
-            .map(raw -> {
-                try {
-                    return MAPPER.readValue(raw, clazz);
-                } catch (Exception e) {
-                    throw new PropertyFeeException("请求体解析失败，请重试");
-                }
-            });
+        return request.bodyToMono(Map.class)
+            .defaultIfEmpty(Map.of())
+            .map(m -> MAPPER.convertValue(m == null ? Map.of() : m, clazz));
     }
 
     @Override
