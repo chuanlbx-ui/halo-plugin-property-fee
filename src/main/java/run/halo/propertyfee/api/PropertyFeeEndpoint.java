@@ -289,11 +289,28 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 创建支付订单 ============
 
     private Mono<ServerResponse> createPayOrder(ServerRequest request) {
-        return request.bodyToMono(PayOrderRequest.class)
+        // 注意：PayOrderRequest 为 record，部分字段的 JSON body 在 Halo 2.26 运行时
+        // 反序列化会异常（bodyToMono 返回 empty，报“请求体不能为空”）。改用 Map
+        // 接收（与 payNotify 一致的成功模式），手动构造请求对象。
+        return request.bodyToMono(Map.class)
             .switchIfEmpty(Mono.error(new PropertyFeeException("请求体不能为空")))
-            .flatMap(req -> doCreatePayOrder(req))
+            .flatMap(m -> doCreatePayOrder(toPayOrderRequest(m)))
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private static PayOrderRequest toPayOrderRequest(Map<?, ?> m) {
+        Integer year = m.get("year") == null ? null
+            : Integer.parseInt(String.valueOf(m.get("year")));
+        return new PayOrderRequest(
+            m.get("community") == null ? null : String.valueOf(m.get("community")),
+            m.get("building") == null ? null : String.valueOf(m.get("building")),
+            m.get("room") == null ? null : String.valueOf(m.get("room")),
+            year,
+            m.get("payType") == null ? null : String.valueOf(m.get("payType")),
+            m.get("payChannel") == null ? null : String.valueOf(m.get("payChannel")),
+            m.get("openid") == null ? null : String.valueOf(m.get("openid")),
+            m.get("remark") == null ? null : String.valueOf(m.get("remark")));
     }
 
     private Mono<Map<String, Object>> doCreatePayOrder(PayOrderRequest req) {

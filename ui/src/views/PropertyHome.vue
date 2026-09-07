@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div style="padding: 24px 28px">
     <!-- 顶部 Tab 导航 -->
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e8edf5; padding-bottom: 0">
       <h2 style="margin: 0 24px 0 0; font-size: 18px; color: #0a2a5e; white-space: nowrap">🏘️ 物业费管理</h2>
