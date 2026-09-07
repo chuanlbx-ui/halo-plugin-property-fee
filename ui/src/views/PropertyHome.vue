@@ -27,11 +27,13 @@ import ReportView from './ReportView.vue'
 import PropertyList from './PropertyList.vue'
 import StandardList from './StandardList.vue'
 import PaymentConfigList from './PaymentConfigList.vue'
+import CommunityList from './CommunityList.vue'
 
 const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
 const tabs = [
   { key: 'report', label: '📊 缴费报表', comp: markRaw(ReportView) },
   { key: 'properties', label: '🏠 房屋管理', comp: markRaw(PropertyList) },
+  { key: 'communities', label: '🏘️ 小区配置', comp: markRaw(CommunityList) },
   { key: 'standards', label: '💰 收费标准', comp: markRaw(StandardList) },
   { key: 'configs', label: '💳 商户配置', comp: markRaw(PaymentConfigList) },
 ]

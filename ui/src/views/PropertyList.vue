@@ -43,7 +43,7 @@
             <span style="background: #f0f4ff; color: #1a4f9e; padding: 2px 8px; border-radius: 4px; font-size: 12px">{{ p.spec.propertyType || '住宅' }}</span>
           </td>
           <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ p.spec.area }}</td>
-          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ p.spec.ownerName || '-' }}</td>
+          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ ownerNames(p.spec) }}</td>
           <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ p.spec.ownerPhone || '-' }}</td>
           <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ p.spec.ownerType || '业主' }}</td>
           <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
@@ -89,33 +89,80 @@
       <div style="background: #fff; border-radius: 12px; padding: 24px; width: 560px; max-width: 92vw; max-height: 90vh; overflow-y: auto">
         <h3 style="margin: 0 0 12px">{{ editing ? '✏️ 编辑房屋' : '➕ 新增房屋' }}</h3>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
-          <input v-model="newProp.community" placeholder="小区 *" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <select v-model="newProp.propertyType" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px">
-            <option value="住宅">住宅</option>
-            <option value="商铺">商铺</option>
-            <option value="车位">车位</option>
-            <option value="其他">其他</option>
-          </select>
-          <input v-model="newProp.building" placeholder="楼栋 *" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model="newProp.unit" placeholder="单元" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model="newProp.room" placeholder="房号 *" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model.number="newProp.area" type="number" placeholder="面积(㎡) *" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model="newProp.ownerName" placeholder="业主姓名" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model="newProp.ownerPhone" placeholder="手机号" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <input v-model="newProp.ownerIdCard" placeholder="身份证号" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; grid-column: span 2" />
-          <select v-model="newProp.ownerType" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px">
-            <option value="业主">业主</option>
-            <option value="租户">租户</option>
-            <option value="亲属">亲属</option>
-          </select>
-          <input v-model="newProp.moveInDate" type="date" placeholder="入住日期" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px" />
-          <select v-model="newProp.houseStatus" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px">
-            <option value="自住">自住</option>
-            <option value="出租">出租</option>
-            <option value="空置">空置</option>
-            <option value="装修">装修</option>
-          </select>
-          <input v-model="newProp.remark" placeholder="备注" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; grid-column: span 2" />
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">小区 <b style="color:#cf1322">*</b></div>
+            <select v-model="newProp.community" @change="onCommunityChange" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
+              <option value="">请选择小区</option>
+              <option v-for="c in enabledCommunities" :key="c.metadata.name" :value="c.spec.name">{{ c.spec.name }}</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">物业类型</div>
+            <select v-model="newProp.propertyType" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
+              <option value="住宅">住宅</option>
+              <option value="商铺">商铺</option>
+              <option value="车位">车位</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">楼栋 <b style="color:#cf1322">*</b>（取自小区配置）</div>
+            <select v-model="newProp.building" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
+              <option value="">请选择楼栋</option>
+              <option v-for="b in buildingOptions" :key="b" :value="b">{{ b }}</option>
+            </select>
+            <div v-if="!buildingOptions.length && newProp.community" style="font-size:12px;color:#cf1322;margin-top:2px">
+              该小区未配楼栋，请先到「小区配置」补充
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">单元（选填）</div>
+            <input v-model="newProp.unit" placeholder="如 1 / 2" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
+          </div>
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">房号 <b style="color:#cf1322">*</b></div>
+            <input v-model="newProp.room" placeholder="如 101 / 1202" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
+          </div>
+          <div>
+            <div style="font-size:12px;color:#66788f;margin-bottom:4px">面积(㎡) <b style="color:#cf1322">*</b></div>
+            <input v-model.number="newProp.area" type="number" placeholder="如 89.5" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
+          </div>
+          <div style="grid-column: span 2; margin-top: 6px; border: 1px solid #e3e9f5; border-radius: 8px; padding: 10px 12px; background: #fafcff">
+            <div style="display:flex;align-items:center;margin-bottom:8px">
+              <span style="font-size:13px;font-weight:600;color:#0a2a5e">👥 业主档案（同一房屋可登记多位业主/共有人/租户）</span>
+              <div style="flex:1"></div>
+              <button style="padding:4px 10px;background:#f0f4ff;border:1px dashed #1a4f9e;color:#1a4f9e;border-radius:6px;cursor:pointer;font-size:12px" @click="owners.push({ name:'', phone:'', idCard:'', type:'业主', isPrimary:false })">＋ 添加业主</button>
+            </div>
+            <div v-for="(o, i) in owners" :key="i" style="display:grid;grid-template-columns:110px 1fr 1fr 90px 36px;gap:6px;margin-bottom:6px;align-items:center">
+              <input v-model="o.name" placeholder="姓名" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
+              <input v-model="o.phone" placeholder="手机号" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
+              <input v-model="o.idCard" placeholder="身份证(选填)" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
+              <select v-model="o.type" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px">
+                <option value="业主">业主</option>
+                <option value="共有人">共有人</option>
+                <option value="租户">租户</option>
+                <option value="亲属">亲属</option>
+              </select>
+              <button :title="o.isPrimary ? '主业主（可缴费/收通知）' : '设为主业主'" style="background:none;border:none;cursor:pointer;font-size:16px" @click="setPrimary(i)">{{ o.isPrimary ? '⭐' : '☆' }}</button>
+            </div>
+            <div v-if="!owners.length" style="font-size:12px;color:#99a3b3">暂无业主，请点击右上「＋ 添加业主」录入（第一位默认为主业主，⭐ 表示主业主）</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;grid-column:span 2">
+            <div>
+              <div style="font-size:12px;color:#66788f;margin-bottom:4px">入住日期（选填）</div>
+              <input v-model="newProp.moveInDate" type="date" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
+            </div>
+            <div>
+              <div style="font-size:12px;color:#66788f;margin-bottom:4px">房屋状态</div>
+              <select v-model="newProp.houseStatus" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
+                <option value="自住">自住</option>
+                <option value="出租">出租</option>
+                <option value="空置">空置</option>
+                <option value="装修">装修</option>
+              </select>
+            </div>
+          </div>
+          <input v-model="newProp.remark" placeholder="备注" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box;grid-column:span 2" />
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px">
           <button style="padding: 8px 16px; background: #bbb; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="showAdd = false">取消</button>
@@ -132,6 +179,8 @@ import axios from 'axios'
 
 const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
 const items = ref<any[]>([])
+const communities = ref<any[]>([])
+const owners = ref<any[]>([])
 const filter = ref({ community: '', building: '', room: '', ownerName: '' })
 const showImport = ref(false)
 const showAdd = ref(false)
@@ -139,10 +188,17 @@ const editing = ref<any>(null)
 const file = ref<File | null>(null)
 const importResult = ref('')
 
+const enabledCommunities = computed(() => communities.value.filter((c) => c.spec?.enabled !== false))
+const buildingOptions = computed(() => {
+  const c = communities.value.find((x) => x.spec?.name === newProp.value.community)
+  return c?.spec?.buildings || []
+})
+
 const emptyProp = () => ({
   community: '', building: '', unit: '', room: '', area: 0,
   propertyType: '住宅', ownerName: '', ownerPhone: '', ownerIdCard: '',
   ownerType: '业主', moveInDate: '', houseStatus: '自住', remark: '',
+  owners: [] as any[],
 })
 const newProp = ref(emptyProp())
 
@@ -165,23 +221,71 @@ async function load() {
   }
 }
 
+async function loadCommunities() {
+  try {
+    const res = await axios.get(`${API_BASE}/communities`)
+    communities.value = res.data.items || []
+  } catch (e: any) {
+    // 老版本接口不存在时忽略（表单退化为自由填写由后端兼容）
+    communities.value = []
+  }
+}
+
+function onCommunityChange() {
+  newProp.value.building = ''
+}
+
+function setPrimary(i: number) {
+  owners.value.forEach((o, idx) => (o.isPrimary = idx === i))
+}
+
+function syncOwnersToSpec() {
+  const clean = owners.value
+    .map((o) => ({ name: (o.name || '').trim(), phone: (o.phone || '').trim(), idCard: (o.idCard || '').trim(), type: o.type || '业主', isPrimary: !!o.isPrimary }))
+    .filter((o) => o.name || o.phone)
+  if (!clean.length) {
+    clean.push({ name: '', phone: '', idCard: '', type: '业主', isPrimary: true })
+  }
+  if (!clean.some((o) => o.isPrimary)) clean[0].isPrimary = true
+  const p = clean.find((o) => o.isPrimary) || clean[0]
+  newProp.value.owners = clean
+  newProp.value.ownerName = p.name
+  newProp.value.ownerPhone = p.phone
+  newProp.value.ownerIdCard = p.idCard
+  newProp.value.ownerType = p.type || '业主'
+}
+
 function openAdd() {
   editing.value = null
   newProp.value = emptyProp()
+  owners.value = [{ name: '', phone: '', idCard: '', type: '业主', isPrimary: true }]
   showAdd.value = true
 }
 
 function openEdit(p: any) {
   editing.value = p
-  newProp.value = { ...emptyProp(), ...JSON.parse(JSON.stringify(p.spec)) }
+  const spec = JSON.parse(JSON.stringify(p.spec || {}))
+  newProp.value = { ...emptyProp(), ...spec }
+  if (!spec.owners || !spec.owners.length) {
+    // 老数据：单业主字段回填为第一行业主
+    owners.value = [{ name: spec.ownerName || '', phone: spec.ownerPhone || '', idCard: spec.ownerIdCard || '', type: spec.ownerType || '业主', isPrimary: true }]
+  } else {
+    owners.value = spec.owners.map((o: any) => ({ ...o }))
+  }
+  if (!owners.value.some((o) => o.isPrimary)) owners.value[0].isPrimary = true
   showAdd.value = true
 }
 
 async function saveProperty() {
   if (!newProp.value.community || !newProp.value.building || !newProp.value.room) {
-    alert('请填写小区、楼栋、房号')
+    alert('请选择小区、楼栋并填写房号')
     return
   }
+  if (!newProp.value.area || newProp.value.area <= 0) {
+    alert('请填写建筑面积')
+    return
+  }
+  syncOwnersToSpec()
   try {
     if (editing.value) {
       await axios.put(`${API_BASE}/properties/${editing.value.metadata.name}`, {
@@ -295,9 +399,21 @@ async function remove(p: any) {
   }
 }
 
-function statusColor(s: string) {
+function ownerNames(s: any) {
+  if (!s) return '-'
+  if (s.owners && s.owners.length) {
+    const names = s.owners.map((o: any) => o.name).filter(Boolean)
+    return names.length ? names.join('、') : (s.ownerName || '-')
+  }
+  return s.ownerName || '-'
+}
+
+function statusColor(s: string | undefined) {
   return { 自住: '#389e0d', 出租: '#1a4f9e', 空置: '#999', 装修: '#d48806' }[s || '自住'] || '#666'
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadCommunities()
+})
 </script>
