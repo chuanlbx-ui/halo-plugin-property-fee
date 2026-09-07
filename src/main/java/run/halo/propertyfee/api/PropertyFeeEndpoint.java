@@ -293,8 +293,14 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         // empty 的竞态（报"请求体不能为空"，与 record/Map 类型无关，实测稳定复现）。
         // 方案：body 为空时自动回退读取 query 参数，保证下单链路可用。
         return request.bodyToMono(Map.class)
-            .switchIfEmpty(Mono.fromSupplier(() -> fromQueryParams(request)))
-            .flatMap(m -> doCreatePayOrder(toPayOrderRequest(m)))
+            .defaultIfEmpty(new java.util.HashMap<>())
+            .flatMap(m -> {
+                // body 字段优先；body 缺失/解析异常时用 query 参数补全（Halo 2.26
+                // 对部分 JSON body 存在解析竞态返回 empty/空 Map）
+                Map<String, Object> merged = new java.util.HashMap<>((Map<String, Object>) m);
+                merged.putAll(fromQueryParams(request));
+                return doCreatePayOrder(toPayOrderRequest(merged));
+            })
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
