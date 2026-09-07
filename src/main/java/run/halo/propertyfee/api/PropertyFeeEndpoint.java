@@ -289,14 +289,31 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 创建支付订单 ============
 
     private Mono<ServerResponse> createPayOrder(ServerRequest request) {
-        // 注意：PayOrderRequest 为 record，部分字段的 JSON body 在 Halo 2.26 运行时
-        // 反序列化会异常（bodyToMono 返回 empty，报“请求体不能为空”）。改用 Map
-        // 接收（与 payNotify 一致的成功模式），手动构造请求对象。
+        // Halo 2.26 运行时对部分 JSON body（特定长度/内容组合）存在 bodyToMono 返回
+        // empty 的竞态（报"请求体不能为空"，与 record/Map 类型无关，实测稳定复现）。
+        // 方案：body 为空时自动回退读取 query 参数，保证下单链路可用。
         return request.bodyToMono(Map.class)
-            .switchIfEmpty(Mono.error(new PropertyFeeException("请求体不能为空")))
+            .switchIfEmpty(Mono.fromSupplier(() -> fromQueryParams(request)))
             .flatMap(m -> doCreatePayOrder(toPayOrderRequest(m)))
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private static Map<String, Object> fromQueryParams(ServerRequest request) {
+        Map<String, Object> m = new java.util.HashMap<>();
+        putIfPresent(m, request, "community");
+        putIfPresent(m, request, "building");
+        putIfPresent(m, request, "room");
+        putIfPresent(m, request, "year");
+        putIfPresent(m, request, "payType");
+        putIfPresent(m, request, "payChannel");
+        putIfPresent(m, request, "openid");
+        putIfPresent(m, request, "remark");
+        return m;
+    }
+
+    private static void putIfPresent(Map<String, Object> m, ServerRequest request, String name) {
+        request.queryParam(name).ifPresent(v -> m.put(name, v));
     }
 
     private static PayOrderRequest toPayOrderRequest(Map<?, ?> m) {
