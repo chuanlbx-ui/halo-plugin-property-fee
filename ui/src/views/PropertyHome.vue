@@ -12,7 +12,16 @@
         {{ t.label }}
       </button>
       <div style="flex: 1"></div>
-      <span style="font-size: 12px; color: #99a3b3; white-space: nowrap">{{ communityCount }} 个小区 · {{ propertyCount }} 户</span>
+      <a
+        :href="frontUrl"
+        target="_blank"
+        rel="noopener"
+        style="padding: 8px 16px; background: #fff; color: #0a2a5e; border: 1px solid #0a2a5e; border-radius: 6px; cursor: pointer; font-size: 13px; text-decoration: none; white-space: nowrap"
+        title="打开前台缴费页面测试查费/缴费流程"
+      >
+        🏠 前台缴费页 ↗
+      </a>
+      <span style="font-size: 12px; color: #99a3b3; white-space: nowrap; margin-left: 12px">{{ communityCount }} 个小区 · {{ propertyCount }} 户</span>
     </div>
 
     <!-- Tab 内容 -->
@@ -28,6 +37,7 @@ import PropertyList from './PropertyList.vue'
 import StandardList from './StandardList.vue'
 import PaymentConfigList from './PaymentConfigList.vue'
 import CommunityList from './CommunityList.vue'
+import SystemConfigView from './SystemConfigView.vue'
 
 const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
 const tabs = [
@@ -36,6 +46,7 @@ const tabs = [
   { key: 'communities', label: '🏘️ 小区配置', comp: markRaw(CommunityList) },
   { key: 'standards', label: '💰 收费标准', comp: markRaw(StandardList) },
   { key: 'configs', label: '💳 商户配置', comp: markRaw(PaymentConfigList) },
+  { key: 'sys', label: '⚙️ 系统配置', comp: markRaw(SystemConfigView) },
 ]
 const active = ref('report')
 const current = computed(() => tabs.find((t) => t.key === active.value)?.comp || ReportView)
@@ -60,6 +71,8 @@ function switchTab(key: string) {
 
 const communityCount = ref(0)
 const propertyCount = ref(0)
+const frontUrl = ref('')
+
 async function loadStats() {
   try {
     const res = await axios.get(`${API_BASE}/properties`)
@@ -70,5 +83,23 @@ async function loadStats() {
     // 静默失败，不阻塞页面
   }
 }
-onMounted(loadStats)
+
+async function loadFrontUrl() {
+  try {
+    const res = await axios.get(`${API_BASE}/systemconfig`)
+    const cfg = res.data?.spec || {}
+    if (cfg.frontUrl && cfg.frontUrl.trim()) {
+      frontUrl.value = cfg.frontUrl.trim()
+    } else {
+      // 未配置：自动推导当前站点内置前台页面（插件自伺服，任何 Halo 部署均可用）
+      frontUrl.value = window.location.origin + '/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee'
+    }
+  } catch (e) {
+    frontUrl.value = window.location.origin + '/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee'
+  }
+}
+onMounted(() => {
+  loadStats()
+  loadFrontUrl()
+})
 </script>

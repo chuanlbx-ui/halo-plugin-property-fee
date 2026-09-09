@@ -772,6 +772,18 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
         return specMono
             .flatMap(spec -> client.fetch(SystemConfig.class, SystemConfig.FIXED_NAME)
                 .map(cfg -> {
+                    // 合并语义：前端未传（null）的凭据/秘钥字段保留旧值，
+                    // 防止 UI 局部保存把平台注入的 SecretId/AppSecret 等清空。
+                    SystemConfig.SystemConfigSpec old = cfg.getSpec();
+                    if (old != null) {
+                        if (spec.getSmsSecretId() == null) spec.setSmsSecretId(old.getSmsSecretId());
+                        if (spec.getSmsSecretKey() == null) spec.setSmsSecretKey(old.getSmsSecretKey());
+                        if (spec.getSmsSdkAppId() == null) spec.setSmsSdkAppId(old.getSmsSdkAppId());
+                        if (spec.getSmsSignName() == null) spec.setSmsSignName(old.getSmsSignName());
+                        if (spec.getSmsTemplateId() == null) spec.setSmsTemplateId(old.getSmsTemplateId());
+                        if (spec.getWxAppId() == null) spec.setWxAppId(old.getWxAppId());
+                        if (spec.getWxAppSecret() == null) spec.setWxAppSecret(old.getWxAppSecret());
+                    }
                     cfg.setSpec(spec);
                     return cfg;
                 })

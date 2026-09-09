@@ -59,5 +59,8 @@ public class SystemConfig extends AbstractExtension {
 
         /** 微信回调域名基础（必须是公众号后台已配网页授权域名，如 https://aiedu.yn.cn）。 */
         private String wxRedirectBase = "https://aiedu.yn.cn";
+
+        /** 前台缴费页完整 URL（可配置；为空时自动推导当前站点 + /apis/api.propertyfee.halo.run/v1alpha1/property-fee-page）。 */
+        private String frontUrl;
     }
 }

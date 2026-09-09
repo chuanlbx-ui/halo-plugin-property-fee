@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>物业费在线缴纳</title>
+<style>
+  :root {
+    --primary: #1a5fb4;
+    --primary-dark: #12467e;
+    --accent: #e8a33d;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --text: #1f2937;
+    --text-light: #6b7280;
+    --border: #e5e7eb;
+    --success: #16a34a;
+    --danger: #dc2626;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #12467e 0%, #1a5fb4 60%, #2d7dd2 100%);
+    color: #fff;
+    padding: 32px 20px 26px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    top: -60%; right: -20%;
+    width: 320px; height: 320px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+  }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: 1px; position: relative; z-index: 1; }
+  .header p { font-size: 13px; opacity: 0.85; margin-top: 6px; position: relative; z-index: 1; }
+  .container { max-width: 480px; margin: 0 auto; padding: 16px; padding-bottom: 40px; }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 15px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 14px;
+  }
+  .card-title .step {
+    width: 22px; height: 22px;
+    background: var(--primary); color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block; font-size: 13px; color: var(--text-light);
+    margin-bottom: 6px; font-weight: 500;
+  }
+  select, input {
+    width: 100%; padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 15px; color: var(--text);
+    background: #fafbfc;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(26,95,180,0.12);
+    background: #fff;
+  }
+  select:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
+  .select-wrap { position: relative; }
+  .select-wrap::after {
+    content: '▾'; position: absolute; right: 14px; top: 50%;
+    transform: translateY(-50%); color: var(--text-light);
+    pointer-events: none; font-size: 12px;
+  }
+  .btn {
+    display: block; width: 100%;
+    padding: 14px;
+    border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:disabled { background: #c5d2e4; cursor: not-allowed; }
+  .btn-wechat { background: #07c160; color: #fff; }
+  .btn-wechat:disabled { background: #a9e3c4; cursor: not-allowed; }
+  /* 费用明细 */
+  .fee-detail { margin-top: 4px; }
+  .fee-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 14px;
+  }
+  .fee-row:last-child { border-bottom: none; }
+  .fee-row .label { color: var(--text-light); }
+  .fee-row .value { font-weight: 600; color: var(--text); }
+  .fee-row.total { border-bottom: none; padding-top: 14px; }
+  .fee-row.total .label { font-size: 15px; font-weight: 600; color: var(--text); }
+  .fee-row.total .value { font-size: 22px; font-weight: 700; color: var(--danger); }
+  .fee-property {
+    background: #f0f5fc;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  }
+  .fee-property .p-item { display: flex; }
+  .fee-property .p-item .k { color: var(--text-light); margin-right: 6px; }
+  /* 状态提示 */
+  .status-msg {
+    text-align: center; font-size: 14px;
+    padding: 12px; border-radius: 10px;
+    margin-top: 12px; display: none;
+  }
+  .status-msg.ok { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; display: block; }
+  .status-msg.err { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; display: block; }
+  .status-msg.info { background: #eff6ff; color: var(--primary); border: 1px solid #bfdbfe; display: block; }
+  /* 已缴 */
+  .paid-banner {
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 12px;
+    padding: 18px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  /* 二维码弹窗 */
+  .qr-modal-mask {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 999;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .qr-modal {
+    background: #fff;
+    border-radius: 16px;
+    padding: 26px 24px 20px;
+    width: 100%; max-width: 320px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  }
+  .qr-modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .qr-modal .qr-sub { font-size: 13px; color: var(--text-light); margin-bottom: 14px; }
+  #qrBox {
+    width: 230px; height: 230px;
+    margin: 0 auto 12px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #qrBox img, #qrBox canvas { display: block; }
+  .qr-amount { font-size: 24px; font-weight: 800; color: var(--danger); margin-bottom: 8px; }
+  .qr-status { font-size: 14px; color: var(--primary); margin-bottom: 14px; min-height: 20px; }
+  .qr-status.ok { color: var(--success); font-weight: 600; }
+  .qr-close {
+    display: block; width: 100%;
+    padding: 11px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #f9fafb;
+    font-size: 14px; color: var(--text);
+    cursor: pointer;
+  }
+  .qr-close:active { background: #f3f4f6; }
+  .qr-countdown { font-size: 12px; color: #9ca3af; margin-top: 10px; }
+  .paid-banner .icon { font-size: 40px; }
+  .paid-banner .text { font-size: 16px; font-weight: 600; color: var(--success); margin-top: 8px; }
+  .paid-banner .sub { font-size: 13px; color: var(--text-light); margin-top: 6px; }
+  .loading {
+    display: none; text-align: center; padding: 20px;
+    color: var(--text-light); font-size: 14px;
+  }
+  .loading.show { display: block; }
+  .spinner {
+    display: inline-block; width: 22px; height: 22px;
+    border: 3px solid #e5e7eb; border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer { text-align: center; padding: 20px 0 10px; font-size: 12px; color: #9ca3af; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🏠 物业费在线缴纳</h1>
+  <p>选择房屋信息，在线查询并缴纳物业费</p>
+</div>
+
+<div class="container">
+  <!-- 已缴状态 -->
+  <div id="paidBanner" class="paid-banner hidden">
+    <div class="icon">✅</div>
+    <div class="text" id="paidText">该房号物业费已缴纳</div>
+    <div class="sub" id="paidSub"></div>
+  </div>
+
+  <!-- 第一步：选择房屋 -->
+  <div class="card" id="cardStep1">
+    <div class="card-title"><span class="step">1</span>选择房屋</div>
+    <div class="form-group">
+      <label>小区</label>
+      <div class="select-wrap">
+        <select id="selCommunity" onchange="onCommunityChange()">
+          <option value="">请选择小区</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>楼栋</label>
+      <div class="select-wrap">
+        <select id="selBuilding" onchange="onBuildingChange()" disabled>
+          <option value="">请先选择小区</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>房号</label>
+      <div class="select-wrap">
+        <select id="selRoom" onchange="updateQueryBtn()" disabled>
+          <option value="">请先选择楼栋</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>缴费年份</label>
+      <div class="select-wrap">
+        <select id="selYear"></select>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btnQuery" onclick="queryFee()" disabled>查询物业费</button>
+    <div class="status-msg" id="msgStep1"></div>
+  </div>
+
+  <!-- 第二步：费用明细 -->
+  <div class="card hidden" id="cardStep2">
+    <div class="card-title"><span class="step">2</span>费用明细</div>
+    <div class="fee-property" id="feeProperty"></div>
+    <div class="fee-detail" id="feeDetail"></div>
+    <div class="form-group" id="channelGroup" style="margin-top:14px">
+      <label>支付方式</label>
+      <div class="select-wrap">
+        <select id="selChannel" onchange="onChannelChange()"></select>
+      </div>
+      <div id="offlineInfo" class="status-msg info hidden"></div>
+    </div>
+    <!-- 业主身份验证（防缴错费） -->
+    <div id="ownerBox" style="margin-top:16px;border:1px dashed #d0d7e2;border-radius:10px;padding:14px 16px;background:#fafcff">
+      <div id="ownerLogged" class="hidden" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:15px">✅ 业主身份已认证</span>
+        <b id="ownerNameTxt" style="color:#0a2a5e"></b>
+        <span id="ownerPhoneTxt" style="color:#66788f;font-size:13px"></span>
+        <span id="ownerHouseTxt" style="color:#389e0d;font-size:12px"></span>
+        <span style="flex:1"></span>
+        <a href="javascript:logoutOwner()" style="color:#1a4f9e;font-size:13px">切换业主</a>
+      </div>
+      <div id="ownerLoginForm">
+        <div style="font-size:13px;color:#0a2a5e;font-weight:600;margin-bottom:8px">🔐 业主验证（仅限本房屋登记业主缴费）</div>
+        <!-- 微信一键登录（复用平台服务号） -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+          <a href="javascript:wxLogin()" style="flex:1;text-align:center;padding:10px 0;background:#07C160;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;min-width:150px">⚡ 微信一键登录</a>
+          <span style="color:#99a3b3;font-size:12px">微信授权后自动识别业主</span>
+        </div>
+        <div id="wxFirstHint" class="hidden" style="background:#f0fff6;border:1px solid #b7ebc5;color:#135200;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:13px">
+          👋 首次使用微信登录：请在下方输入您的<b>业主手机号</b>并获取验证码，验证通过后即完成绑定，此后微信一键登录免验证码。
+        </div>
+        <div style="display:flex;align-items:center;margin:8px 0;color:#c0c8d4;font-size:12px"><span style="flex:1;height:1px;background:#e3e8f0"></span><span style="padding:0 8px">或手机验证码登录</span><span style="flex:1;height:1px;background:#e3e8f0"></span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="ownerPhone" placeholder="业主手机号" maxlength="11" inputmode="numeric" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid #d0d7e2;border-radius:6px;font-size:14px" />
+          <button class="btn btn-sm" id="btnSendCode" onclick="sendOwnerCode()" style="padding:9px 14px;background:#f0f4ff;color:#1a4f9e;border:1px solid #c6d4ef;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap">获取验证码</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <input id="ownerCode" placeholder="6位短信验证码" maxlength="6" inputmode="numeric" style="flex:1;min-width:120px;padding:9px 10px;border:1px solid #d0d7e2;border-radius:6px;font-size:14px" />
+          <button class="btn btn-primary" onclick="ownerLogin()" style="padding:9px 18px;border-radius:6px;font-size:13px;white-space:nowrap">验证并解锁缴费</button>
+        </div>
+        <div class="status-msg" id="ownerMsg"></div>
+        <div style="color:#99a3b3;font-size:12px;margin-top:6px">登录后只能缴纳本人名下房屋的费用；多人共有的房屋，任一登记业主均可缴费。如有疑问请联系物业核对业主档案。</div>
+      </div>
+    </div>
+    <button class="btn btn-wechat" id="btnPay" onclick="payFee()" style="margin-top:16px">微信支付</button>
+    <div class="status-msg" id="msgStep2"></div>
+    <div class="loading" id="payLoading"><span class="spinner"></span>正在拉起支付…</div>
+  </div>
+
+  <div class="footer">
+    文山州互联网协会 · 技术服务<br>如遇问题请联系物业服务中心
+  </div>
+</div>
+
+<!-- 二维码支付弹窗 -->
+<div class="qr-modal-mask hidden" id="qrModal">
+  <div class="qr-modal">
+    <h3>微信扫码支付</h3>
+    <div class="qr-sub">请使用微信「扫一扫」完成支付</div>
+    <div id="qrBox"></div>
+    <div class="qr-amount" id="qrAmount"></div>
+    <div class="qr-status" id="qrStatus"></div>
+    <button class="qr-close" onclick="closeQrModal()">我已支付 / 关闭</button>
+    <div class="qr-countdown">支付完成后页面将自动刷新</div>
+  </div>
+</div>
+
+<script>
+var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this.parsedData=[];for(var b=[],d=0,e=this.data.length;e>d;d++){var f=this.data.charCodeAt(d);f>65536?(b[0]=240|(1835008&f)>>>18,b[1]=128|(258048&f)>>>12,b[2]=128|(4032&f)>>>6,b[3]=128|63&f):f>2048?(b[0]=224|(61440&f)>>>12,b[1]=128|(4032&f)>>>6,b[2]=128|63&f):f>128?(b[0]=192|(1984&f)>>>6,b[1]=128|63&f):b[0]=f,this.parsedData=this.parsedData.concat(b)}this.parsedData.length!=this.data.length&&(this.parsedData.unshift(191),this.parsedData.unshift(187),this.parsedData.unshift(239))}function b(a,b){this.typeNumber=a,this.errorCorrectLevel=b,this.modules=null,this.moduleCount=0,this.dataCache=null,this.dataList=[]}function i(a,b){if(void 0==a.length)throw new Error(a.length+"/"+b);for(var c=0;c<a.length&&0==a[c];)c++;this.num=new Array(a.length-c+b);for(var d=0;d<a.length-c;d++)this.num[d]=a[d+c]}function j(a,b){this.totalCount=a,this.dataCount=b}function k(){this.buffer=[],this.length=0}function m(){return"undefined"!=typeof CanvasRenderingContext2D}function n(){var a=!1,b=navigator.userAgent;return/android/i.test(b)&&(a=!0,aMat=b.toString().match(/android ([0-9]\.[0-9])/i),aMat&&aMat[1]&&(a=parseFloat(aMat[1]))),a}function r(a,b){for(var c=1,e=s(a),f=0,g=l.length;g>=f;f++){var h=0;switch(b){case d.L:h=l[f][0];break;case d.M:h=l[f][1];break;case d.Q:h=l[f][2];break;case d.H:h=l[f][3]}if(h>=e)break;c++}if(c>l.length)throw new Error("Too long data");return c}function s(a){var b=encodeURI(a).toString().replace(/\%[0-9a-fA-F]{2}/g,"a");return b.length+(b.length!=a?3:0)}a.prototype={getLength:function(){return this.parsedData.length},write:function(a){for(var b=0,c=this.parsedData.length;c>b;b++)a.put(this.parsedData[b],8)}},b.prototype={addData:function(b){var c=new a(b);this.dataList.push(c),this.dataCache=null},isDark:function(a,b){if(0>a||this.moduleCount<=a||0>b||this.moduleCount<=b)throw new Error(a+","+b);return this.modules[a][b]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(a,c){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var d=0;d<this.moduleCount;d++){this.modules[d]=new Array(this.moduleCount);for(var e=0;e<this.moduleCount;e++)this.modules[d][e]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(a,c),this.typeNumber>=7&&this.setupTypeNumber(a),null==this.dataCache&&(this.dataCache=b.createData(this.typeNumber,this.errorCorrectLevel,this.dataList)),this.mapData(this.dataCache,c)},setupPositionProbePattern:function(a,b){for(var c=-1;7>=c;c++)if(!(-1>=a+c||this.moduleCount<=a+c))for(var d=-1;7>=d;d++)-1>=b+d||this.moduleCount<=b+d||(this.modules[a+c][b+d]=c>=0&&6>=c&&(0==d||6==d)||d>=0&&6>=d&&(0==c||6==c)||c>=2&&4>=c&&d>=2&&4>=d?!0:!1)},getBestMaskPattern:function(){for(var a=0,b=0,c=0;8>c;c++){this.makeImpl(!0,c);var d=f.getLostPoint(this);(0==c||a>d)&&(a=d,b=c)}return b},createMovieClip:function(a,b,c){var d=a.createEmptyMovieClip(b,c),e=1;this.make();for(var f=0;f<this.modules.length;f++)for(var g=f*e,h=0;h<this.modules[f].length;h++){var i=h*e,j=this.modules[f][h];j&&(d.beginFill(0,100),d.moveTo(i,g),d.lineTo(i+e,g),d.lineTo(i+e,g+e),d.lineTo(i,g+e),d.endFill())}return d},setupTimingPattern:function(){for(var a=8;a<this.moduleCount-8;a++)null==this.modules[a][6]&&(this.modules[a][6]=0==a%2);for(var b=8;b<this.moduleCount-8;b++)null==this.modules[6][b]&&(this.modules[6][b]=0==b%2)},setupPositionAdjustPattern:function(){for(var a=f.getPatternPosition(this.typeNumber),b=0;b<a.length;b++)for(var c=0;c<a.length;c++){var d=a[b],e=a[c];if(null==this.modules[d][e])for(var g=-2;2>=g;g++)for(var h=-2;2>=h;h++)this.modules[d+g][e+h]=-2==g||2==g||-2==h||2==h||0==g&&0==h?!0:!1}},setupTypeNumber:function(a){for(var b=f.getBCHTypeNumber(this.typeNumber),c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[Math.floor(c/3)][c%3+this.moduleCount-8-3]=d}for(var c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[c%3+this.moduleCount-8-3][Math.floor(c/3)]=d}},setupTypeInfo:function(a,b){for(var c=this.errorCorrectLevel<<3|b,d=f.getBCHTypeInfo(c),e=0;15>e;e++){var g=!a&&1==(1&d>>e);6>e?this.modules[e][8]=g:8>e?this.modules[e+1][8]=g:this.modules[this.moduleCount-15+e][8]=g}for(var e=0;15>e;e++){var g=!a&&1==(1&d>>e);8>e?this.modules[8][this.moduleCount-e-1]=g:9>e?this.modules[8][15-e-1+1]=g:this.modules[8][15-e-1]=g}this.modules[this.moduleCount-8][8]=!a},mapData:function(a,b){for(var c=-1,d=this.moduleCount-1,e=7,g=0,h=this.moduleCount-1;h>0;h-=2)for(6==h&&h--;;){for(var i=0;2>i;i++)if(null==this.modules[d][h-i]){var j=!1;g<a.length&&(j=1==(1&a[g]>>>e));var k=f.getMask(b,d,h-i);k&&(j=!j),this.modules[d][h-i]=j,e--,-1==e&&(g++,e=7)}if(d+=c,0>d||this.moduleCount<=d){d-=c,c=-c;break}}}},b.PAD0=236,b.PAD1=17,b.createData=function(a,c,d){for(var e=j.getRSBlocks(a,c),g=new k,h=0;h<d.length;h++){var i=d[h];g.put(i.mode,4),g.put(i.getLength(),f.getLengthInBits(i.mode,a)),i.write(g)}for(var l=0,h=0;h<e.length;h++)l+=e[h].dataCount;if(g.getLengthInBits()>8*l)throw new Error("code length overflow. ("+g.getLengthInBits()+">"+8*l+")");for(g.getLengthInBits()+4<=8*l&&g.put(0,4);0!=g.getLengthInBits()%8;)g.putBit(!1);for(;;){if(g.getLengthInBits()>=8*l)break;if(g.put(b.PAD0,8),g.getLengthInBits()>=8*l)break;g.put(b.PAD1,8)}return b.createBytes(g,e)},b.createBytes=function(a,b){for(var c=0,d=0,e=0,g=new Array(b.length),h=new Array(b.length),j=0;j<b.length;j++){var k=b[j].dataCount,l=b[j].totalCount-k;d=Math.max(d,k),e=Math.max(e,l),g[j]=new Array(k);for(var m=0;m<g[j].length;m++)g[j][m]=255&a.buffer[m+c];c+=k;var n=f.getErrorCorrectPolynomial(l),o=new i(g[j],n.getLength()-1),p=o.mod(n);h[j]=new Array(n.getLength()-1);for(var m=0;m<h[j].length;m++){var q=m+p.getLength()-h[j].length;h[j][m]=q>=0?p.get(q):0}}for(var r=0,m=0;m<b.length;m++)r+=b[m].totalCount;for(var s=new Array(r),t=0,m=0;d>m;m++)for(var j=0;j<b.length;j++)m<g[j].length&&(s[t++]=g[j][m]);for(var m=0;e>m;m++)for(var j=0;j<b.length;j++)m<h[j].length&&(s[t++]=h[j][m]);return s};for(var c={MODE_NUMBER:1,MODE_ALPHA_NUM:2,MODE_8BIT_BYTE:4,MODE_KANJI:8},d={L:1,M:0,Q:3,H:2},e={PATTERN000:0,PATTERN001:1,PATTERN010:2,PATTERN011:3,PATTERN100:4,PATTERN101:5,PATTERN110:6,PATTERN111:7},f={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHTypeInfo:function(a){for(var b=a<<10;f.getBCHDigit(b)-f.getBCHDigit(f.G15)>=0;)b^=f.G15<<f.getBCHDigit(b)-f.getBCHDigit(f.G15);return(a<<10|b)^f.G15_MASK},getBCHTypeNumber:function(a){for(var b=a<<12;f.getBCHDigit(b)-f.getBCHDigit(f.G18)>=0;)b^=f.G18<<f.getBCHDigit(b)-f.getBCHDigit(f.G18);return a<<12|b},getBCHDigit:function(a){for(var b=0;0!=a;)b++,a>>>=1;return b},getPatternPosition:function(a){return f.PATTERN_POSITION_TABLE[a-1]},getMask:function(a,b,c){switch(a){case e.PATTERN000:return 0==(b+c)%2;case e.PATTERN001:return 0==b%2;case e.PATTERN010:return 0==c%3;case e.PATTERN011:return 0==(b+c)%3;case e.PATTERN100:return 0==(Math.floor(b/2)+Math.floor(c/3))%2;case e.PATTERN101:return 0==b*c%2+b*c%3;case e.PATTERN110:return 0==(b*c%2+b*c%3)%2;case e.PATTERN111:return 0==(b*c%3+(b+c)%2)%2;default:throw new Error("bad maskPattern:"+a)}},getErrorCorrectPolynomial:function(a){for(var b=new i([1],0),c=0;a>c;c++)b=b.multiply(new i([1,g.gexp(c)],0));return b},getLengthInBits:function(a,b){if(b>=1&&10>b)switch(a){case c.MODE_NUMBER:return 10;case c.MODE_ALPHA_NUM:return 9;case c.MODE_8BIT_BYTE:return 8;case c.MODE_KANJI:return 8;default:throw new Error("mode:"+a)}else if(27>b)switch(a){case c.MODE_NUMBER:return 12;case c.MODE_ALPHA_NUM:return 11;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 10;default:throw new Error("mode:"+a)}else{if(!(41>b))throw new Error("type:"+b);switch(a){case c.MODE_NUMBER:return 14;case c.MODE_ALPHA_NUM:return 13;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 12;default:throw new Error("mode:"+a)}}},getLostPoint:function(a){for(var b=a.getModuleCount(),c=0,d=0;b>d;d++)for(var e=0;b>e;e++){for(var f=0,g=a.isDark(d,e),h=-1;1>=h;h++)if(!(0>d+h||d+h>=b))for(var i=-1;1>=i;i++)0>e+i||e+i>=b||(0!=h||0!=i)&&g==a.isDark(d+h,e+i)&&f++;f>5&&(c+=3+f-5)}for(var d=0;b-1>d;d++)for(var e=0;b-1>e;e++){var j=0;a.isDark(d,e)&&j++,a.isDark(d+1,e)&&j++,a.isDark(d,e+1)&&j++,a.isDark(d+1,e+1)&&j++,(0==j||4==j)&&(c+=3)}for(var d=0;b>d;d++)for(var e=0;b-6>e;e++)a.isDark(d,e)&&!a.isDark(d,e+1)&&a.isDark(d,e+2)&&a.isDark(d,e+3)&&a.isDark(d,e+4)&&!a.isDark(d,e+5)&&a.isDark(d,e+6)&&(c+=40);for(var e=0;b>e;e++)for(var d=0;b-6>d;d++)a.isDark(d,e)&&!a.isDark(d+1,e)&&a.isDark(d+2,e)&&a.isDark(d+3,e)&&a.isDark(d+4,e)&&!a.isDark(d+5,e)&&a.isDark(d+6,e)&&(c+=40);for(var k=0,e=0;b>e;e++)for(var d=0;b>d;d++)a.isDark(d,e)&&k++;var l=Math.abs(100*k/b/b-50)/5;return c+=10*l}},g={glog:function(a){if(1>a)throw new Error("glog("+a+")");return g.LOG_TABLE[a]},gexp:function(a){for(;0>a;)a+=255;for(;a>=256;)a-=255;return g.EXP_TABLE[a]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)},h=0;8>h;h++)g.EXP_TABLE[h]=1<<h;for(var h=8;256>h;h++)g.EXP_TABLE[h]=g.EXP_TABLE[h-4]^g.EXP_TABLE[h-5]^g.EXP_TABLE[h-6]^g.EXP_TABLE[h-8];for(var h=0;255>h;h++)g.LOG_TABLE[g.EXP_TABLE[h]]=h;i.prototype={get:function(a){return this.num[a]},getLength:function(){return this.num.length},multiply:function(a){for(var b=new Array(this.getLength()+a.getLength()-1),c=0;c<this.getLength();c++)for(var d=0;d<a.getLength();d++)b[c+d]^=g.gexp(g.glog(this.get(c))+g.glog(a.get(d)));return new i(b,0)},mod:function(a){if(this.getLength()-a.getLength()<0)return this;for(var b=g.glog(this.get(0))-g.glog(a.get(0)),c=new Array(this.getLength()),d=0;d<this.getLength();d++)c[d]=this.get(d);for(var d=0;d<a.getLength();d++)c[d]^=g.gexp(g.glog(a.get(d))+b);return new i(c,0).mod(a)}},j.RS_BLOCK_TABLE=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],j.getRSBlocks=function(a,b){var c=j.getRsBlockTable(a,b);if(void 0==c)throw new Error("bad rs block @ typeNumber:"+a+"/errorCorrectLevel:"+b);for(var d=c.length/3,e=[],f=0;d>f;f++)for(var g=c[3*f+0],h=c[3*f+1],i=c[3*f+2],k=0;g>k;k++)e.push(new j(h,i));return e},j.getRsBlockTable=function(a,b){switch(b){case d.L:return j.RS_BLOCK_TABLE[4*(a-1)+0];case d.M:return j.RS_BLOCK_TABLE[4*(a-1)+1];case d.Q:return j.RS_BLOCK_TABLE[4*(a-1)+2];case d.H:return j.RS_BLOCK_TABLE[4*(a-1)+3];default:return void 0}},k.prototype={get:function(a){var b=Math.floor(a/8);return 1==(1&this.buffer[b]>>>7-a%8)},put:function(a,b){for(var c=0;b>c;c++)this.putBit(1==(1&a>>>b-c-1))},getLengthInBits:function(){return this.length},putBit:function(a){var b=Math.floor(this.length/8);this.buffer.length<=b&&this.buffer.push(0),a&&(this.buffer[b]|=128>>>this.length%8),this.length++}};var l=[[17,14,11,7],[32,26,20,14],[53,42,32,24],[78,62,46,34],[106,84,60,44],[134,106,74,58],[154,122,86,64],[192,152,108,84],[230,180,130,98],[271,213,151,119],[321,251,177,137],[367,287,203,155],[425,331,241,177],[458,362,258,194],[520,412,292,220],[586,450,322,250],[644,504,364,280],[718,560,394,310],[792,624,442,338],[858,666,482,382],[929,711,509,403],[1003,779,565,439],[1091,857,611,461],[1171,911,661,511],[1273,997,715,535],[1367,1059,751,593],[1465,1125,805,625],[1528,1190,868,658],[1628,1264,908,698],[1732,1370,982,742],[1840,1452,1030,790],[1952,1538,1112,842],[2068,1628,1168,898],[2188,1722,1228,958],[2303,1809,1283,983],[2431,1911,1351,1051],[2563,1989,1423,1093],[2699,2099,1499,1139],[2809,2213,1579,1219],[2953,2331,1663,1273]],o=function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){function g(a,b){var c=document.createElementNS("http://www.w3.org/2000/svg",a);for(var d in b)b.hasOwnProperty(d)&&c.setAttribute(d,b[d]);return c}var b=this._htOption,c=this._el,d=a.getModuleCount();Math.floor(b.width/d),Math.floor(b.height/d),this.clear();var h=g("svg",{viewBox:"0 0 "+String(d)+" "+String(d),width:"100%",height:"100%",fill:b.colorLight});h.setAttributeNS("http://www.w3.org/2000/xmlns/","xmlns:xlink","http://www.w3.org/1999/xlink"),c.appendChild(h),h.appendChild(g("rect",{fill:b.colorDark,width:"1",height:"1",id:"template"}));for(var i=0;d>i;i++)for(var j=0;d>j;j++)if(a.isDark(i,j)){var k=g("use",{x:String(i),y:String(j)});k.setAttributeNS("http://www.w3.org/1999/xlink","href","#template"),h.appendChild(k)}},a.prototype.clear=function(){for(;this._el.hasChildNodes();)this._el.removeChild(this._el.lastChild)},a}(),p="svg"===document.documentElement.tagName.toLowerCase(),q=p?o:m()?function(){function a(){this._elImage.src=this._elCanvas.toDataURL("image/png"),this._elImage.style.display="block",this._elCanvas.style.display="none"}function d(a,b){var c=this;if(c._fFail=b,c._fSuccess=a,null===c._bSupportDataURI){var d=document.createElement("img"),e=function(){c._bSupportDataURI=!1,c._fFail&&_fFail.call(c)},f=function(){c._bSupportDataURI=!0,c._fSuccess&&c._fSuccess.call(c)};return d.onabort=e,d.onerror=e,d.onload=f,d.src="data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",void 0}c._bSupportDataURI===!0&&c._fSuccess?c._fSuccess.call(c):c._bSupportDataURI===!1&&c._fFail&&c._fFail.call(c)}if(this._android&&this._android<=2.1){var b=1/window.devicePixelRatio,c=CanvasRenderingContext2D.prototype.drawImage;CanvasRenderingContext2D.prototype.drawImage=function(a,d,e,f,g,h,i,j){if("nodeName"in a&&/img/i.test(a.nodeName))for(var l=arguments.length-1;l>=1;l--)arguments[l]=arguments[l]*b;else"undefined"==typeof j&&(arguments[1]*=b,arguments[2]*=b,arguments[3]*=b,arguments[4]*=b);c.apply(this,arguments)}}var e=function(a,b){this._bIsPainted=!1,this._android=n(),this._htOption=b,this._elCanvas=document.createElement("canvas"),this._elCanvas.width=b.width,this._elCanvas.height=b.height,a.appendChild(this._elCanvas),this._el=a,this._oContext=this._elCanvas.getContext("2d"),this._bIsPainted=!1,this._elImage=document.createElement("img"),this._elImage.style.display="none",this._el.appendChild(this._elImage),this._bSupportDataURI=null};return e.prototype.draw=function(a){var b=this._elImage,c=this._oContext,d=this._htOption,e=a.getModuleCount(),f=d.width/e,g=d.height/e,h=Math.round(f),i=Math.round(g);b.style.display="none",this.clear();for(var j=0;e>j;j++)for(var k=0;e>k;k++){var l=a.isDark(j,k),m=k*f,n=j*g;c.strokeStyle=l?d.colorDark:d.colorLight,c.lineWidth=1,c.fillStyle=l?d.colorDark:d.colorLight,c.fillRect(m,n,f,g),c.strokeRect(Math.floor(m)+.5,Math.floor(n)+.5,h,i),c.strokeRect(Math.ceil(m)-.5,Math.ceil(n)-.5,h,i)}this._bIsPainted=!0},e.prototype.makeImage=function(){this._bIsPainted&&d.call(this,a)},e.prototype.isPainted=function(){return this._bIsPainted},e.prototype.clear=function(){this._oContext.clearRect(0,0,this._elCanvas.width,this._elCanvas.height),this._bIsPainted=!1},e.prototype.round=function(a){return a?Math.floor(1e3*a)/1e3:a},e}():function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){for(var b=this._htOption,c=this._el,d=a.getModuleCount(),e=Math.floor(b.width/d),f=Math.floor(b.height/d),g=['<table style="border:0;border-collapse:collapse;">'],h=0;d>h;h++){g.push("<tr>");for(var i=0;d>i;i++)g.push('<td style="border:0;border-collapse:collapse;padding:0;margin:0;width:'+e+"px;height:"+f+"px;background-color:"+(a.isDark(h,i)?b.colorDark:b.colorLight)+';"></td>');g.push("</tr>")}g.push("</table>"),c.innerHTML=g.join("");var j=c.childNodes[0],k=(b.width-j.offsetWidth)/2,l=(b.height-j.offsetHeight)/2;k>0&&l>0&&(j.style.margin=l+"px "+k+"px")},a.prototype.clear=function(){this._el.innerHTML=""},a}();QRCode=function(a,b){if(this._htOption={width:256,height:256,typeNumber:4,colorDark:"#000000",colorLight:"#ffffff",correctLevel:d.H},"string"==typeof b&&(b={text:b}),b)for(var c in b)this._htOption[c]=b[c];"string"==typeof a&&(a=document.getElementById(a)),this._android=n(),this._el=a,this._oQRCode=null,this._oDrawing=new q(this._el,this._htOption),this._htOption.text&&this.makeCode(this._htOption.text)},QRCode.prototype.makeCode=function(a){this._oQRCode=new b(r(a,this._htOption.correctLevel),this._htOption.correctLevel),this._oQRCode.addData(a),this._oQRCode.make(),this._el.title=a,this._oDrawing.draw(this._oQRCode),this.makeImage()},QRCode.prototype.makeImage=function(){"function"==typeof this._oDrawing.makeImage&&(!this._android||this._android>=3)&&this._oDrawing.makeImage()},QRCode.prototype.clear=function(){this._oDrawing.clear()},QRCode.CorrectLevel=d}();
+</script>
+<script>
+const API = '/apis/api.propertyfee.halo.run/v1alpha1';
+let options = null;
+let currentFee = null;
+
+async function apiGet(path) {
+  const res = await fetch(API + path, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error('请求失败 ' + res.status);
+  return res.json();
+}
+
+async function apiPost(path, body, headers) {
+  const res = await fetch(API + path, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.detail || '请求失败');
+  return data;
+}
+
+function showMsg(el, text, type) {
+  el.textContent = text;
+  el.className = 'status-msg ' + type;
+}
+
+// 初始化年份（今年-3 ~ 今年+1）
+function initYears() {
+  const y = new Date().getFullYear();
+  const sel = document.getElementById('selYear');
+  sel.innerHTML = '';
+  for (let i = y - 3; i <= y + 1; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = i + ' 年';
+    if (i === y) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadOptions() {
+  const btn = document.getElementById('btnQuery');
+  btn.disabled = true;
+  btn.textContent = '加载中…';
+  try {
+    options = await apiGet('/properties/options');
+    const selC = document.getElementById('selCommunity');
+    selC.innerHTML = '<option value="">请选择小区</option>';
+    (options.communities || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      selC.appendChild(opt);
+    });
+    if ((options.communities || []).length === 0) {
+      showMsg(document.getElementById('msgStep1'), '暂无可查询的房屋数据，请联系物业', 'err');
+    }
+  } catch (e) {
+    showMsg(document.getElementById('msgStep1'), '加载小区失败：' + e.message, 'err');
+  } finally {
+    btn.textContent = '查询物业费';
+    btn.disabled = true;
+  }
+}
+
+function onCommunityChange() {
+  const c = document.getElementById('selCommunity').value;
+  const selB = document.getElementById('selBuilding');
+  const selR = document.getElementById('selRoom');
+  selR.innerHTML = '<option value="">请先选择楼栋</option>';
+  selR.disabled = true;
+  selB.innerHTML = '<option value="">请选择楼栋</option>';
+  selB.disabled = !c;
+  if (c) {
+    (options.buildings[c] || []).forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b; opt.textContent = b;
+      selB.appendChild(opt);
+    });
+  }
+  updateQueryBtn();
+}
+
+function onBuildingChange() {
+  const c = document.getElementById('selCommunity').value;
+  const b = document.getElementById('selBuilding').value;
+  const selR = document.getElementById('selRoom');
+  selR.innerHTML = '<option value="">请选择房号</option>';
+  selR.disabled = !b;
+  if (b) {
+    (options.rooms[c + '|' + b] || []).forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r; opt.textContent = r + ' 室';
+      selR.appendChild(opt);
+    });
+  }
+  updateQueryBtn();
+}
+
+function updateQueryBtn() {
+  const c = document.getElementById('selCommunity').value;
+  const b = document.getElementById('selBuilding').value;
+  const r = document.getElementById('selRoom').value;
+  document.getElementById('btnQuery').disabled = !(c && b && r);
+}
+
+async function queryFee() {
+  const c = document.getElementById('selCommunity').value;
+  const b = document.getElementById('selBuilding').value;
+  const r = document.getElementById('selRoom').value;
+  const y = parseInt(document.getElementById('selYear').value);
+  const btn = document.getElementById('btnQuery');
+  const msg = document.getElementById('msgStep1');
+
+  btn.disabled = true;
+  btn.textContent = '查询中…';
+  showMsg(msg, '', '');
+  try {
+    const data = await apiPost('/properties/fee-query', { community: c, building: b, room: r, year: y });
+    currentFee = data;
+    renderFee(data);
+    document.getElementById('cardStep2').classList.remove('hidden');
+    document.getElementById('cardStep1').classList.add('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showMsg(msg, '', '');
+  } catch (e) {
+    showMsg(msg, e.message, 'err');
+  } finally {
+    btn.textContent = '查询物业费';
+    btn.disabled = !(c && b && r);
+  }
+}
+
+function renderFee(data) {
+  const p = data.property;
+  document.getElementById('feeProperty').innerHTML = `
+    <div class="p-item"><span class="k">小区</span>${p.community}</div>
+    <div class="p-item"><span class="k">房号</span>${p.building} ${p.room} 室</div>
+    <div class="p-item"><span class="k">业主</span>${p.ownerName || '—'}</div>
+    <div class="p-item"><span class="k">面积</span>${data.area} ㎡</div>
+    ${p.propertyType ? `<div class="p-item"><span class="k">类型</span>${p.propertyType}</div>` : ''}
+  `;
+  let html = '';
+  if (data.unitPrice) {
+    const months = { year: 12, half: 6, quarter: 3, month: 1 }[data.billingCycle] || 12;
+    html += `<div class="fee-row"><span class="label">物业费（${data.unitPrice}元/㎡·月 × ${months}月）</span><span class="value">¥${data.propertyFee.toFixed(2)}</span></div>`;
+  }
+  (data.extraFees || []).forEach(f => {
+    html += `<div class="fee-row"><span class="label">${f.name}</span><span class="value">¥${f.amount.toFixed(2)}</span></div>`;
+  });
+  if (data.discountAmount > 0) {
+    html += `<div class="fee-row" style="color:#389e0d"><span class="label">优惠减免</span><span class="value">-¥${data.discountAmount.toFixed(2)}</span></div>`;
+  }
+  html += `<div class="fee-row total"><span class="label">应缴合计（${data.year} 年）</span><span class="value">¥${data.totalAmount.toFixed(2)}</span></div>`;
+  document.getElementById('feeDetail').innerHTML = html;
+
+  // 支付渠道
+  renderChannels(data.channels || []);
+
+  // 已缴状态
+  const paidBanner = document.getElementById('paidBanner');
+  const btnPay = document.getElementById('btnPay');
+  if (data.paid) {
+    paidBanner.classList.remove('hidden');
+    document.getElementById('paidText').textContent = data.message;
+    document.getElementById('paidSub').textContent = '缴纳时间：' + (data.paidAt || '') + '　·　如需查询缴费凭证请联系物业';
+    btnPay.classList.add('hidden');
+    document.getElementById('channelGroup').classList.add('hidden');
+  } else {
+    paidBanner.classList.add('hidden');
+    btnPay.classList.remove('hidden');
+    document.getElementById('channelGroup').classList.remove('hidden');
+  }
+  // V4：若已登录业主，自动恢复认证态并校验是否名下房屋
+  const stored = getOwnerInfo();
+  if (stored) renderOwnerLogged(stored);
+}
+
+// 渲染支付渠道下拉
+function renderChannels(channels) {
+  const sel = document.getElementById('selChannel');
+  const grp = document.getElementById('channelGroup');
+  const offlineInfo = document.getElementById('offlineInfo');
+  if (!channels || !channels.length) {
+    grp.classList.add('hidden');
+    return;
+  }
+  grp.classList.remove('hidden');
+  sel.innerHTML = '';
+  channels.forEach((ch, i) => {
+    const opt = document.createElement('option');
+    opt.value = ch.channelName || ch.channelType;
+    opt.textContent = (ch.isDefault ? '⭐ ' : '') + ch.channelName + '（' + channelTypeText(ch.channelType) + '）';
+    sel.appendChild(opt);
+  });
+  // 更新按钮文字与线下说明
+  onChannelChange();
+  // 记录渠道列表供 payFee 使用
+  window.currentChannels = channels;
+}
+
+function channelTypeText(t) {
+  return { wechat_native: '扫码', wechat_jsapi: '公众号', alipay: '支付宝', offline: '线下' }[t] || t;
+}
+
+function onChannelChange() {
+  const sel = document.getElementById('selChannel');
+  const btn = document.getElementById('btnPay');
+  const offlineInfo = document.getElementById('offlineInfo');
+  const channels = window.currentChannels || [];
+  const name = sel.value;
+  const ch = channels.find(c => (c.channelName || c.channelType) === name);
+  if (!ch) return;
+  if (ch.channelType === 'offline') {
+    btn.textContent = '已线下收款登记';
+    if (ch.offlineInstruction) {
+      offlineInfo.textContent = '线下收款说明：' + ch.offlineInstruction;
+      offlineInfo.classList.remove('hidden');
+    } else {
+      offlineInfo.textContent = '线下收款：请联系物业完成缴费登记';
+      offlineInfo.classList.remove('hidden');
+    }
+  } else if (ch.channelType === 'wechat_native') {
+    btn.textContent = '微信扫码支付';
+    offlineInfo.classList.add('hidden');
+  } else if (ch.channelType === 'wechat_jsapi') {
+    btn.textContent = '微信支付';
+    offlineInfo.classList.add('hidden');
+  } else if (ch.channelType === 'alipay') {
+    btn.textContent = '支付宝支付';
+    offlineInfo.classList.add('hidden');
+  } else {
+    btn.textContent = '确认支付';
+    offlineInfo.classList.add('hidden');
+  }
+}
+
+/* ============ V4 业主登录（手机验证码） ============ */
+let pendingPay = false;   // 未登录点了支付，登录成功后自动继续
+const OWNER_KEY = 'pf_owner_info';
+let codeCountdown = null;
+
+function getOwnerInfo() {
+  try {
+    return JSON.parse(localStorage.getItem(OWNER_KEY) || 'null');
+  } catch (e) { return null; }
+}
+
+function setOwnerInfo(info) {
+  if (info) localStorage.setItem(OWNER_KEY, JSON.stringify(info));
+  else localStorage.removeItem(OWNER_KEY);
+}
+
+/* ===== 微信一键登录（复用平台服务号，经 aiedu.yn.cn 授权域名回调） ===== */
+function getOwnerMsg() { return document.getElementById('ownerMsg'); }
+
+async function wxLogin() {
+  const msg = getOwnerMsg();
+  const clean = location.origin + location.pathname;
+  try {
+    const data = await apiPost('/wx/authorize?redirect=' + encodeURIComponent(clean), {});
+    if (data.url) { location.href = data.url; }
+    else { showMsg(msg, (data.message || '微信登录暂不可用，请用手机验证码'), 'err'); }
+  } catch (e) { showMsg(msg, '微信登录失败，请用手机验证码', 'err'); }
+}
+
+/** 微信授权回跳处理：wx=cb&ok=1&token=.. 已绑定自动登录；first=1&wxopenid=.. 首次绑定提示。 */
+function handleWxCallback() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('wx') !== 'cb') return;
+  const msg = getOwnerMsg();
+  const token = q.get('token');
+  const phone = q.get('phone');
+  const oid = q.get('wxopenid');
+  history.replaceState({}, '', location.origin + location.pathname);
+  if (q.get('err')) {
+    showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
+    return;
+  }
+  if (token) {
+    setOwnerInfo({ token: token, phone: phone || '' });
+    renderOwnerLogged(getOwnerInfo());
+    showMsg(msg, '✅ 微信登录成功，可进行缴费', 'ok');
+    return;
+  }
+  if (oid) {
+    window._wxOpenid = oid;
+    document.getElementById('wxFirstHint').classList.remove('hidden');
+    showMsg(msg, '请先完成业主手机号绑定（仅首次）', 'ok');
+  }
+}
+
+/** 首次微信绑定：openid + 业主手机号 + 短信验证码。 */
+async function wxBindLogin() {
+  const oid = window._wxOpenid;
+  const msg = getOwnerMsg();
+  if (!oid) { showMsg(msg, '绑定会话已失效，请重新点击微信登录', 'err'); return; }
+  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
+  const code = document.getElementById('ownerCode').value.trim();
+  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位业主手机号', 'err'); return; }
+  if (!code) { showMsg(msg, '请先获取并输入短信验证码', 'err'); return; }
+  try {
+    const data = await apiPost('/wx/bind', { openid: oid, phone: phone, code: code });
+    if (data.token) {
+      setOwnerInfo({ token: data.token, phone: data.phone || phone, name: data.name || '' });
+      document.getElementById('wxFirstHint').classList.add('hidden');
+      window._wxOpenid = null;
+      renderOwnerLogged(getOwnerInfo());
+      showMsg(msg, '✅ 绑定成功！此后微信一键登录免验证码', 'ok');
+    } else {
+      showMsg(msg, (data.message || '绑定失败，请重试'), 'err');
+    }
+  } catch (e) { showMsg(msg, '绑定失败，请重试', 'err'); }
+}
+
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', handleWxCallback);
+  } else {
+    setTimeout(handleWxCallback, 300);
+  }
+}
+
+async function sendOwnerCode() {
+  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
+  const msg = document.getElementById('ownerMsg');
+  const btn = document.getElementById('btnSendCode');
+  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
+  btn.disabled = true;
+  try {
+    const data = await apiPost('/auth/send-code', { phone: phone });
+    if (data.success || data.message) {
+      const tip = data.message ? data.message : '验证码已发送';
+      showMsg(msg, tip, 'ok');
+    } else {
+      showMsg(msg, data.message || '发送失败，请稍后再试', 'err');
+    }
+  } catch (e) {
+    showMsg(msg, e.message || '发送失败，请稍后再试', 'err');
+    btn.disabled = false;
+    return;
+  }
+  // 60s 倒计时
+  let left = 60;
+  btn.textContent = left + 's 后重发';
+  codeCountdown = setInterval(() => {
+    left--;
+    if (left <= 0) {
+      clearInterval(codeCountdown);
+      btn.textContent = '获取验证码';
+      btn.disabled = false;
+    } else {
+      btn.textContent = left + 's 后重发';
+    }
+  }, 1000);
+}
+
+async function ownerLogin() {
+  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
+  const code = document.getElementById('ownerCode').value.trim();
+  const msg = document.getElementById('ownerMsg');
+  const btn = document.querySelector('#ownerLoginForm .btn-primary');
+  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
+  if (!/^\d{6}$/.test(code)) { showMsg(msg, '请输入 6 位短信验证码', 'err'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '验证中…'; }
+  try {
+    const data = await apiPost('/auth/login', { phone: phone, code: code });
+    if (!data.token) { showMsg(msg, data.message || '登录失败，请重试', 'err'); return; }
+    setOwnerInfo({ token: data.token, phone: data.phone, name: '', houses: data.houses || [] });
+    // 若名下房屋都无业主姓名，尝试显示脱敏手机号即可
+    renderOwnerLogged(data);
+    showMsg(msg, '✅ 验证成功，已解锁缴费', 'ok');
+    if (pendingPay) {
+      pendingPay = false;
+      setTimeout(() => { const pbtn = document.getElementById('btnPay'); if (pbtn) pbtn.click(); }, 400);
+    }
+  } catch (e) {
+    showMsg(msg, e.message || '登录失败，请重试', 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '验证并解锁缴费'; }
+  }
+}
+
+function renderOwnerLogged(data) {
+  const info = data || getOwnerInfo();
+  if (!info) return;
+  const current = currentFee ? currentFee.property : null;
+  let inList = false;
+  let ownerName = '';
+  if (info.houses && current) {
+    inList = info.houses.some(h => h.community === current.community && h.building === current.building && h.room === current.room);
+  }
+  if (info.houses && info.houses.length) {
+    // 在名下房屋中找当前房的业主名
+    if (current) {
+      const h = info.houses.find(x => x.community === current.community && x.building === current.building && x.room === current.room);
+      if (h && h.owners && h.owners.length) {
+        const me = h.owners.find(o => (o.phone || '').replace(/\D/g, '').indexOf((info.phone || '').slice(-4)) >= 0) || h.owners[0];
+        ownerName = me ? (me.name || '') : '';
+      }
+    }
+    if (!ownerName && info.houses[0].owners && info.houses[0].owners.length) {
+      ownerName = info.houses[0].owners[0].name || '';
+    }
+  }
+  const phoneMask = info.phone ? info.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') : '';
+  document.getElementById('ownerNameTxt').textContent = ownerName || '';
+  document.getElementById('ownerPhoneTxt').textContent = phoneMask;
+  const btnPay = document.getElementById('btnPay');
+  if (current && !inList && info.houses && info.houses.length) {
+    document.getElementById('ownerHouseTxt').textContent = '⚠ 当前房屋不在您名下，无法缴费';
+    if (btnPay) { btnPay.disabled = true; btnPay.textContent = '非您名下房屋，无法缴费'; }
+  } else {
+    document.getElementById('ownerHouseTxt').textContent = info.houses ? ('名下房屋 ' + info.houses.length + ' 套') : '';
+    if (btnPay) { btnPay.disabled = false; btnPay.textContent = '微信支付'; }
+  }
+  document.getElementById('ownerLogged').classList.remove('hidden');
+  document.getElementById('ownerLoginForm').style.display = 'none';
+}
+
+function logoutOwner() {
+  setOwnerInfo(null);
+  document.getElementById('ownerLogged').classList.add('hidden');
+  document.getElementById('ownerLoginForm').style.display = '';
+  document.getElementById('ownerMsg').textContent = '';
+  document.getElementById('btnPay').disabled = false;
+  document.getElementById('btnPay').textContent = '微信支付';
+  pendingPay = false;
+}
+
+async function payFee() {
+  if (!currentFee) return;
+  const btn = document.getElementById('btnPay');
+  const msg = document.getElementById('msgStep2');
+  const loading = document.getElementById('payLoading');
+  const p = currentFee.property;
+  const y = currentFee.year;
+  const sel = document.getElementById('selChannel');
+  const channels = window.currentChannels || [];
+  const name = sel.value;
+  const ch = channels.find(c => (c.channelName || c.channelType) === name);
+  const payType = ch ? ch.channelType : 'native';
+  const payChannel = ch ? (ch.channelName || ch.channelType) : null;
+
+  // ---- V4 业主守卫：未验证业主身份先引导登录 ----
+  const ownerInfo = getOwnerInfo();
+  if (!ownerInfo || !ownerInfo.token) {
+    showMsg(msg, '请先完成上方「业主验证」后再缴费（仅限本房屋登记业主）', 'err');
+    document.getElementById('ownerBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    pendingPay = true;
+    btn.disabled = false;
+    return;
+  }
+
+  btn.disabled = true;
+  loading.classList.add('show');
+  showMsg(msg, '', '');
+  try {
+    // 双通道：body + URL query（Halo 2.26 对部分 JSON body 解析有竞态，query 兜底保证下单成功）
+    const qs = new URLSearchParams({
+      community: p.community, building: p.building, room: p.room, year: y,
+      payType: payType, payChannel: payChannel || ''
+    });
+    const data = await apiPost('/feerecords/pay?' + qs.toString(), {
+      community: p.community, building: p.building, room: p.room, year: y,
+      payType: payType, payChannel: payChannel
+    }, { 'X-Owner-Token': getOwnerInfo().token });
+    if (data.status === 'PAID' && payType === 'offline') {
+      // 线下登记成功
+      showMsg(msg, data.message || '线下收款已登记，缴费完成', 'ok');
+      setTimeout(() => location.reload(), 1500);
+      return;
+    }
+    // 跳转支付（Native/JSAPI 由后端根据场景返回）
+    if (data.payUrl) {
+      window.location.href = data.payUrl;
+    } else if (data.jsapiParams) {
+      // JSAPI 场景（微信内）
+      if (typeof WeixinJSBridge !== 'undefined') {
+        WeixinJSBridge.invoke('getBrandWCPayRequest', data.jsapiParams, res => {
+          if (res.err_msg === 'get_brand_wcpay_request:ok') {
+            showMsg(msg, '支付成功！', 'ok');
+            setTimeout(() => location.reload(), 1500);
+          } else {
+            showMsg(msg, '支付未完成：' + (res.err_msg || ''), 'err');
+            btn.disabled = false;
+          }
+        });
+      } else {
+        showMsg(msg, '请在微信内打开进行支付', 'info');
+        btn.disabled = false;
+      }
+    } else if (data.codeUrl) {
+      // Native 扫码场景：弹出二维码
+      showQrModal(data.codeUrl, data.totalAmount, data.outTradeNo);
+      btn.disabled = false;
+    } else {
+      showMsg(msg, '下单成功，请在微信中完成支付', 'info');
+      setTimeout(() => checkStatus(data.outTradeNo), 3000);
+    }
+  } catch (e) {
+    showMsg(msg, e.message, 'err');
+  } finally {
+    loading.classList.remove('show');
+  }
+}
+
+/* ============ Native 二维码弹窗 ============ */
+let qrTimer = null;
+function showQrModal(codeUrl, amount, outTradeNo) {
+  const modal = document.getElementById('qrModal');
+  const box = document.getElementById('qrBox');
+  box.innerHTML = '';
+  // 生成二维码（用 qrcodejs 或 qrcode 库）
+  if (typeof QRCode !== 'undefined') {
+    new QRCode(box, { text: codeUrl, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  } else if (typeof qrcode !== 'undefined') {
+    qrcode.toDataURL(codeUrl, { width: 220, margin: 1 }, (err, url) => {
+      if (!err) {
+        const img = document.createElement('img');
+        img.src = url; img.width = 220; img.height = 220; img.style.borderRadius = '8px';
+        box.appendChild(img);
+      }
+    });
+  } else {
+    // 兜底：显示支付链接文本
+    box.innerHTML = '<div style="font-size:12px;word-break:break-all;color:#666">' + codeUrl + '</div>';
+  }
+  const amt = Number(amount || 0);
+  document.getElementById('qrAmount').textContent = '¥' + (isFinite(amt) ? amt.toFixed(2) : amount);
+  modal.classList.remove('hidden');
+  // 轮询支付状态
+  clearInterval(qrTimer);
+  qrTimer = setInterval(async () => {
+    try {
+      const st = await apiGet('/feerecords/' + outTradeNo + '/status');
+      if (st.status === 'PAID' || st.paid) {
+        clearInterval(qrTimer);
+        document.getElementById('qrStatus').textContent = '✅ 支付成功！';
+        document.getElementById('qrStatus').className = 'qr-status ok';
+        setTimeout(() => { closeQrModal(); location.reload(); }, 1500);
+      }
+    } catch (e) { /* ignore */ }
+  }, 3000);
+  document.getElementById('qrStatus').textContent = '请使用微信扫一扫完成支付';
+  document.getElementById('qrStatus').className = 'qr-status';
+}
+
+function closeQrModal() {
+  document.getElementById('qrModal').classList.add('hidden');
+  clearInterval(qrTimer);
+}
+
+async function checkStatus(outTradeNo) {
+  try {
+    const data = await apiGet('/feerecords/' + outTradeNo + '/status');
+    if (data.paid) {
+      showMsg(document.getElementById('msgStep2'), '支付成功！', 'ok');
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      showMsg(document.getElementById('msgStep2'), '支付结果确认中，请稍后刷新页面查看', 'info');
+    }
+  } catch (e) { /* ignore */ }
+}
+
+initYears();
+loadOptions();
+</script>
+<script src="/user-nav.js?v=20260907b"></script><script src="/wx-share.js?v=20260904"></script><script src="/wb-menu-inject.js?v=20260906"></script></body>
+</html>

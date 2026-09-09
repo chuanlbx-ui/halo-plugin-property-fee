@@ -146,7 +146,33 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     .content(contentBuilder().mediaType(MediaType.APPLICATION_JSON_VALUE)
                         .schema(schemaBuilder().implementation(Map.class))))
                 .response(responseBuilder().implementation(Map.class)))
+            // 前台缴费页面（收进 jar 的静态页，插件自伺服——迁移到任何 Halo 系统均可用）
+            .GET("pages/property-fee", this::serveFrontPage, builder -> builder
+                .operationId("ServeFrontPage").description("Serve built-in property fee front page (HTML).")
+                .tag(tag)
+                .response(responseBuilder().implementation(String.class)))
             .build();
+    }
+
+    /** 伺服内置前台缴费页（resources/frontend/property-fee.html）。 */
+    private Mono<ServerResponse> serveFrontPage(ServerRequest request) {
+        try {
+            var in = getClass().getResourceAsStream("/frontend/property-fee.html");
+            if (in == null) {
+                return ServerResponse.status(HttpStatus.NOT_FOUND)
+                    .contentType(MediaType.TEXT_HTML)
+                    .bodyValue("前台页面资源缺失，请检查插件安装完整性");
+            }
+            String html = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            return ServerResponse.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                .bodyValue(html);
+        } catch (Exception e) {
+            return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(MediaType.TEXT_HTML)
+                .bodyValue("前台页面加载失败：" + e.getMessage());
+        }
     }
 
     @Override
@@ -351,7 +377,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 // 对部分 JSON body 存在解析竞态返回 empty/空 Map）
                 Map<String, Object> merged = new java.util.HashMap<>((Map<String, Object>) m);
                 merged.putAll(fromQueryParams(request));
-                return doCreatePayOrder(toPayOrderRequest(merged), ownerPhone);
+                return doCreatePayOrder(toPayOrderRequest(merged), ownerPhone, resolveSiteBase(request));
             })
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
@@ -388,7 +414,8 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             m.get("remark") == null ? null : String.valueOf(m.get("remark")));
     }
 
-    private Mono<Map<String, Object>> doCreatePayOrder(PayOrderRequest req, String payerPhone) {
+    private Mono<Map<String, Object>> doCreatePayOrder(PayOrderRequest req, String payerPhone,
+        String siteBase) {
         if (req.community() == null || req.community().isBlank()
             || req.building() == null || req.building().isBlank()
             || req.room() == null || req.room().isBlank()) {
@@ -462,20 +489,21 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                                             "status", "PAID",
                                             "message", "线下收款已登记，缴费完成"));
                                 }
-                                return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req));
+                                return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req, siteBase));
                             });
                         }));
             });
     }
 
     private Mono<Map<String, Object>> createWxOrder(PaymentConfig pc, FeeCalc calc,
-        String outTradeNo, long totalFen, PayOrderRequest req) {
+        String outTradeNo, long totalFen, PayOrderRequest req, String siteBase) {
         String community = req.community();
         String description = "物业费-" + community + "-" + req.building() + "-" + req.room()
             + "-" + req.year() + "年";
         String notifyUrl = pc.getSpec().getNotifyUrl();
         if (notifyUrl == null || notifyUrl.isBlank()) {
-            notifyUrl = "https://wenbita.cn/apis/api.propertyfee.halo.run/v1alpha1/feerecords/notify";
+            // 未配置通知地址时动态推导当前站点（迁移部署无需改代码）
+            notifyUrl = siteBase + "/apis/api.propertyfee.halo.run/v1alpha1/feerecords/notify";
         }
         if ("jsapi".equals(req.payType())) {
             if (req.openid() == null || req.openid().isBlank()) {
@@ -780,6 +808,36 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
 
     // ============ 工具 ============
 
+    /** 从请求推导当前站点基础 URL（http(s)://host），供回调/前台页面等动态拼接。
+     *  优先取 X-Forwarded-Proto/X-Forwarded-Host（nginx 反代场景），其次取请求自身。 */
+    private static String resolveSiteBase(ServerRequest request) {
+        String proto = request.headers().firstHeader("X-Forwarded-Proto");
+        String host = request.headers().firstHeader("X-Forwarded-Host");
+        if (!hasText(host)) {
+            host = request.headers().firstHeader("Host");
+        }
+        if (!hasText(host)) {
+            host = "localhost";
+        }
+        if (!hasText(proto)) {
+            proto = "https";
+        }
+        return proto + "://" + host;
+    }
+
+    /** 前台缴费页 URL：配置优先；为空时自动推导当前站点 + 插件伺服页面路径。 */
+    private Mono<String> resolveFrontUrl(ServerRequest request) {
+        return loadSystemConfig()
+            .map(cfg -> {
+                String front = cfg.getFrontUrl();
+                if (hasText(front)) {
+                    return front;
+                }
+                return resolveSiteBase(request)
+                    + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee";
+            });
+    }
+
     private <E extends run.halo.app.extension.Extension> Mono<List<E>> listAll(Class<E> clazz) {
         return client.listAll(clazz, ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
@@ -849,10 +907,14 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 return badRequest("微信登录未启用，请先在后台系统配置中启用（复用平台服务号）");
             }
             String redirectTarget = request.queryParam("redirect")
-                .filter(s -> hasText(s)).orElse("https://wenbita.cn/property-fee.html");
+                .filter(s -> hasText(s))
+                .orElseGet(() -> hasText(cfg.getFrontUrl())
+                    ? cfg.getFrontUrl()
+                    : resolveSiteBase(request)
+                        + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee");
             String base = hasText(cfg.getWxRedirectBase())
-                ? cfg.getWxRedirectBase() : "https://aiedu.yn.cn";
-            // 回调经 aiedu.yn.cn（公众号后台已配网页授权域名）→ nginx /pf-wx/ 反代回本插件
+                ? cfg.getWxRedirectBase() : resolveSiteBase(request);
+            // 回调经公众号后台已配的网页授权域名 → nginx /pf-wx/ 反代回本插件
             String callback = base + "/pf-wx/callback";
             String state = java.util.Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(redirectTarget.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -870,7 +932,10 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     /** 微信授权回调：code 换 openid → 命中已绑定业主发 Token；未命中提示先绑定手机号。 */
     private Mono<ServerResponse> wxCallback(ServerRequest request) {
         String code = request.queryParam("code").orElse("");
-        final String redirectTarget = decodeRedirect(request.queryParam("state").orElse(""));
+        String defaultFront = resolveSiteBase(request)
+            + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee";
+        String decoded = decodeRedirect(request.queryParam("state").orElse(""));
+        final String redirectTarget = hasText(decoded) ? decoded : defaultFront;
         if (code.isBlank()) {
             return redirectTo(redirectTarget + (redirectTarget.contains("?") ? "&" : "?")
                 + "wx=cb&err=denied");
@@ -1001,7 +1066,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             return new String(java.util.Base64.getUrlDecoder().decode(stateRaw),
                 java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
-            return "https://wenbita.cn/property-fee.html";
+            return "";
         }
     }
 
