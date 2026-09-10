@@ -41,6 +41,11 @@ public class WechatPayService {
         return secretStore.decrypt(pc.getSpec() == null ? null : pc.getSpec().getApiV3Key());
     }
 
+    /** 读取微信支付公钥明文（落库为密文；公钥模式商户用于回调验签）。 */
+    public String wxPayPublicKeyOf(PaymentConfig pc) {
+        return secretStore.decrypt(pc.getSpec() == null ? null : pc.getSpec().getWxPayPublicKey());
+    }
+
     /**
      * 获取小区的支付配置。
      * 优先匹配小区专属商户；若未配置则回退到「默认商户」（协会统一微信支付通道）。
@@ -451,6 +456,26 @@ public class WechatPayService {
         }
         final String message = timestamp + "\n" + nonce + "\n" + body + "\n";
         final String targetSerial = serial.trim().toUpperCase(java.util.Locale.ROOT);
+
+        // 模式一：微信支付公钥（新版商户）；回调头 Wechatpay-Serial 形如 PUB_KEY_ID_xxxx
+        if (targetSerial.startsWith("PUB_KEY_ID_")) {
+            return reactor.core.publisher.Flux.fromIterable(configs)
+                .filter(pc -> pc.getSpec() != null && pc.getSpec().getMchId() != null)
+                .filter(pc -> {
+                    String pkId = pc.getSpec().getWxPayPublicKeyId();
+                    return pkId == null || pkId.isBlank() || pkId.equalsIgnoreCase(targetSerial);
+                })
+                .concatMap(pc -> {
+                    java.security.PublicKey pub = parsePublicKey(wxPayPublicKeyOf(pc));
+                    return pub != null && verifySignature(pub, message, signature)
+                        ? Mono.just(pc) : Mono.empty();
+                })
+                .next()
+                .switchIfEmpty(Mono.error(new PropertyFeeException(
+                    "回调验签失败：请在商户配置中填写「微信支付公钥」及其公钥 ID（微信支付公钥模式）")));
+        }
+
+        // 模式二：平台证书（老版商户，platformCert 从 /v3/certificates 拉取）
         return reactor.core.publisher.Flux.fromIterable(configs)
             .filter(pc -> pc.getSpec() != null && pc.getSpec().getMchId() != null)
             .concatMap(pc -> platformCert(pc, targetSerial)
@@ -463,9 +488,31 @@ public class WechatPayService {
 
     private static boolean verifySignature(java.security.cert.X509Certificate cert,
         String message, String signature) {
+        return verifySignature(cert.getPublicKey(), message, signature);
+    }
+
+    /** 解析 PEM 公钥（微信支付公钥）。 */
+    private static java.security.PublicKey parsePublicKey(String pem) {
+        if (pem == null || pem.isBlank()) {
+            return null;
+        }
+        try {
+            String base64 = pem.replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "")
+                .replaceAll("\\s", "");
+            byte[] der = Base64.getDecoder().decode(base64);
+            return java.security.KeyFactory.getInstance("RSA")
+                .generatePublic(new java.security.spec.X509EncodedKeySpec(der));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean verifySignature(java.security.PublicKey publicKey,
+        String message, String signature) {
         try {
             Signature verifier = Signature.getInstance("SHA256withRSA");
-            verifier.initVerify(cert.getPublicKey());
+            verifier.initVerify(publicKey);
             verifier.update(message.getBytes(StandardCharsets.UTF_8));
             return verifier.verify(Base64.getDecoder().decode(signature));
         } catch (Exception e) {

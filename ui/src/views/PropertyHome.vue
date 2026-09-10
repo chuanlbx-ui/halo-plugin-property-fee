@@ -1,105 +1,85 @@
 <template>
-  <div style="padding: 24px 28px">
-    <!-- 顶部 Tab 导航 -->
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e8edf5; padding-bottom: 0">
-      <h2 style="margin: 0 24px 0 0; font-size: 18px; color: #0a2a5e; white-space: nowrap">🏘️ 物业费管理</h2>
-      <button
-        v-for="t in tabs"
-        :key="t.key"
-        :style="tabStyle(t.key)"
-        @click="switchTab(t.key)"
-      >
-        {{ t.label }}
-      </button>
-      <div style="flex: 1"></div>
-      <a
-        :href="frontUrl"
-        target="_blank"
-        rel="noopener"
-        style="padding: 8px 16px; background: #fff; color: #0a2a5e; border: 1px solid #0a2a5e; border-radius: 6px; cursor: pointer; font-size: 13px; text-decoration: none; white-space: nowrap"
-        title="打开前台缴费页面测试查费/缴费流程"
-      >
-        🏠 前台缴费页 ↗
-      </a>
-      <span style="font-size: 12px; color: #99a3b3; white-space: nowrap; margin-left: 12px">{{ communityCount }} 个小区 · {{ propertyCount }} 户</span>
-    </div>
+  <div class="pf-view">
+    <VPageHeader title="物业费管理">
+      <template #icon>
+        <IconPlug />
+      </template>
+      <template #actions>
+        <VButton @click="openFrontPage">
+          <template #icon>
+            <IconExternalLinkLine />
+          </template>
+          前台缴费页
+        </VButton>
+      </template>
+    </VPageHeader>
 
-    <!-- Tab 内容 -->
+    <VTabbar :active-id="active" :items="tabItems" @change="onTabChange" />
+
     <component :is="current" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, markRaw, onMounted } from 'vue'
-import axios from 'axios'
+import { computed, markRaw, onMounted, ref } from 'vue'
+import { VButton, VPageHeader, VTabbar } from '@halo-dev/components'
+import { IconExternalLinkLine, IconPlug } from '@halo-dev/components'
+import axios, { API_BASE, API_VERSION } from '@/utils/api'
 import ReportView from './ReportView.vue'
 import PropertyList from './PropertyList.vue'
+import CommunityList from './CommunityList.vue'
 import StandardList from './StandardList.vue'
 import PaymentConfigList from './PaymentConfigList.vue'
-import CommunityList from './CommunityList.vue'
 import SystemConfigView from './SystemConfigView.vue'
 
-const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
-const tabs = [
-  { key: 'report', label: '📊 缴费报表', comp: markRaw(ReportView) },
-  { key: 'properties', label: '🏠 房屋管理', comp: markRaw(PropertyList) },
-  { key: 'communities', label: '🏘️ 小区配置', comp: markRaw(CommunityList) },
-  { key: 'standards', label: '💰 收费标准', comp: markRaw(StandardList) },
-  { key: 'configs', label: '💳 商户配置', comp: markRaw(PaymentConfigList) },
-  { key: 'sys', label: '⚙️ 系统配置', comp: markRaw(SystemConfigView) },
+type TabKey = 'report' | 'properties' | 'communities' | 'standards' | 'configs' | 'sys'
+
+// VTabbar 的 items 只接受 { [key: string]: string }，因此标签与组件分开维护
+const tabItems = [
+  { id: 'report', label: '缴费报表' },
+  { id: 'properties', label: '房屋管理' },
+  { id: 'communities', label: '小区配置' },
+  { id: 'standards', label: '收费标准' },
+  { id: 'configs', label: '支付渠道' },
+  { id: 'sys', label: '系统配置' },
 ]
-const active = ref('report')
-const current = computed(() => tabs.find((t) => t.key === active.value)?.comp || ReportView)
 
-function tabStyle(key: string) {
-  const on = active.value === key
-  return {
-    padding: '10px 18px',
-    border: 'none',
-    background: on ? '#0a2a5e' : 'transparent',
-    color: on ? '#fff' : '#5a6478',
-    borderRadius: '8px 8px 0 0',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: on ? 600 : 400,
-  }
+const tabs: Record<TabKey, any> = {
+  report: markRaw(ReportView),
+  properties: markRaw(PropertyList),
+  communities: markRaw(CommunityList),
+  standards: markRaw(StandardList),
+  configs: markRaw(PaymentConfigList),
+  sys: markRaw(SystemConfigView),
 }
 
-function switchTab(key: string) {
-  active.value = key
+const active = ref<TabKey>('report')
+const current = computed(() => tabs[active.value] || tabs.report)
+
+function onTabChange(id: string | number) {
+  active.value = id as TabKey
 }
 
-const communityCount = ref(0)
-const propertyCount = ref(0)
-const frontUrl = ref('')
-
-async function loadStats() {
-  try {
-    const res = await axios.get(`${API_BASE}/properties`)
-    const items = res.data.items || []
-    propertyCount.value = items.length
-    communityCount.value = new Set(items.map((p: any) => p.spec?.community).filter(Boolean)).size
-  } catch (e) {
-    // 静默失败，不阻塞页面
-  }
-}
+/**
+ * 前台缴费页地址：优先使用系统配置中的自定义地址，
+ * 未配置时回退到插件自带的前台页面（任何 Halo 部署均可直接访问）。
+ */
+const frontUrl = ref(`${API_VERSION}/pages/property-fee`)
 
 async function loadFrontUrl() {
+  const fallback = `${window.location.origin}/apis/api.${API_VERSION}/pages/property-fee`
   try {
     const res = await axios.get(`${API_BASE}/systemconfig`)
-    const cfg = res.data?.spec || {}
-    if (cfg.frontUrl && cfg.frontUrl.trim()) {
-      frontUrl.value = cfg.frontUrl.trim()
-    } else {
-      // 未配置：自动推导当前站点内置前台页面（插件自伺服，任何 Halo 部署均可用）
-      frontUrl.value = window.location.origin + '/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee'
-    }
-  } catch (e) {
-    frontUrl.value = window.location.origin + '/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee'
+    const configured = (res.data?.spec?.frontUrl || '').trim()
+    frontUrl.value = configured || fallback
+  } catch {
+    frontUrl.value = fallback
   }
 }
-onMounted(() => {
-  loadStats()
-  loadFrontUrl()
-})
+
+function openFrontPage() {
+  window.open(frontUrl.value, '_blank', 'noopener')
+}
+
+onMounted(loadFrontUrl)
 </script>

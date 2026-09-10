@@ -423,10 +423,14 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
             spec.put("notifyUrl", s.getNotifyUrl());
             spec.put("offlineInstruction", s.getOfflineInstruction());
             spec.put("remark", s.getRemark());
+            spec.put("mchSerialNo", s.getMchSerialNo());
+            spec.put("wxPayPublicKeyId", s.getWxPayPublicKeyId());
             spec.put("apiV3Key", null);
             spec.put("mchPrivateKey", null);
+            spec.put("wxPayPublicKey", null);
             spec.put("apiV3KeySet", SecretStore.isConfigured(s.getApiV3Key()));
             spec.put("mchPrivateKeySet", SecretStore.isConfigured(s.getMchPrivateKey()));
+            spec.put("wxPayPublicKeySet", SecretStore.isConfigured(s.getWxPayPublicKey()));
         }
         out.put("spec", spec);
         return out;
@@ -443,6 +447,8 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
         spec.setApiV3Key(mergeSecret(spec.getApiV3Key(), old == null ? null : old.getApiV3Key()));
         spec.setMchPrivateKey(mergeSecret(spec.getMchPrivateKey(),
             old == null ? null : old.getMchPrivateKey()));
+        spec.setWxPayPublicKey(mergeSecret(spec.getWxPayPublicKey(),
+            old == null ? null : old.getWxPayPublicKey()));
     }
 
     private String mergeSecret(String incoming, String oldCipher) {

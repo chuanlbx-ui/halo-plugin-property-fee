@@ -1,223 +1,452 @@
 <template>
-  <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
-      <h2 style="margin: 0">🏠 房屋与业主管理</h2>
-      <div style="display: flex; gap: 8px">
-        <button style="padding: 6px 16px; background: #0a2a5e; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="showImport = true">
-          📥 Excel 导入
-        </button>
-        <button style="padding: 6px 16px; background: #389e0d; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="openAdd">
-          ➕ 新增房屋
-        </button>
+  <div class="pf-view">
+    <!-- 工具栏：筛选 + 操作 -->
+    <div class="pf-toolbar">
+      <div class="pf-toolbar__fields">
+        <div class="pf-filter">
+          <FormKit v-model="filter.community" type="text" placeholder="小区" />
+        </div>
+        <div class="pf-filter">
+          <FormKit v-model="filter.building" type="text" placeholder="楼栋" />
+        </div>
+        <div class="pf-filter">
+          <FormKit v-model="filter.room" type="text" placeholder="房号" />
+        </div>
+        <div class="pf-filter">
+          <FormKit v-model="filter.ownerName" type="text" placeholder="业主姓名" />
+        </div>
+      </div>
+      <div class="pf-toolbar__actions">
+        <VButton :loading="loading" @click="load">
+          <template #icon><IconRefreshLine /></template>
+          刷新
+        </VButton>
+        <VButton @click="downloadTemplate">
+          <template #icon><IconDownload /></template>
+          下载模板
+        </VButton>
+        <VButton @click="openImport">
+          <template #icon><IconRiUpload2Fill /></template>
+          Excel 导入
+        </VButton>
+        <VButton type="primary" @click="openAdd">
+          <template #icon><IconAddCircle /></template>
+          新增房屋
+        </VButton>
       </div>
     </div>
 
-    <!-- 搜索 -->
-    <div style="margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap">
-      <input v-model="filter.community" placeholder="小区" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; width: 140px" />
-      <input v-model="filter.building" placeholder="楼栋" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; width: 100px" />
-      <input v-model="filter.room" placeholder="房号" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; width: 100px" />
-      <input v-model="filter.ownerName" placeholder="业主姓名" style="padding: 8px 10px; border: 1px solid #d0d7e2; border-radius: 6px; width: 120px" />
-      <button style="padding: 8px 16px; background: #1a4f9e; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="load">查询</button>
-    </div>
+    <VLoading v-if="loading" />
 
-    <table style="width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(10,42,94,.06); font-size: 14px">
-      <thead>
-        <tr style="background: #f0f4ff; color: #0a2a5e">
-          <th style="padding: 10px; text-align: left">小区</th>
-          <th style="padding: 10px; text-align: center">楼栋/单元/房号</th>
-          <th style="padding: 10px; text-align: center">物业类型</th>
-          <th style="padding: 10px; text-align: center">面积(㎡)</th>
-          <th style="padding: 10px; text-align: left">业主</th>
-          <th style="padding: 10px; text-align: left">手机号</th>
-          <th style="padding: 10px; text-align: center">业主类型</th>
-          <th style="padding: 10px; text-align: center">房屋状态</th>
-          <th style="padding: 10px; text-align: center">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="p in filtered" :key="p.metadata.name">
-          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ p.spec.community }}</td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ p.spec.building }}栋{{ p.spec.unit ? p.spec.unit + '单元' : '' }}{{ p.spec.room }}</td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
-            <span style="background: #f0f4ff; color: #1a4f9e; padding: 2px 8px; border-radius: 4px; font-size: 12px">{{ p.spec.propertyType || '住宅' }}</span>
-          </td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ p.spec.area }}</td>
-          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ ownerNames(p.spec) }}</td>
-          <td style="padding: 10px; border-top: 1px solid #eef1f8">{{ p.spec.ownerPhone || '-' }}</td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">{{ p.spec.ownerType || '业主' }}</td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
-            <span :style="{ color: statusColor(p.spec.houseStatus) }">{{ p.spec.houseStatus || '自住' }}</span>
-          </td>
-          <td style="padding: 10px; text-align: center; border-top: 1px solid #eef1f8">
-            <button style="color: #1a4f9e; background: none; border: none; cursor: pointer; font-size: 13px; margin-right: 8px" @click="openEdit(p)">编辑</button>
-            <button style="color: #cf1322; background: none; border: none; cursor: pointer; font-size: 13px" @click="remove(p)">删除</button>
-          </td>
-        </tr>
-        <tr v-if="!filtered.length">
-          <td colspan="9" style="padding: 30px; text-align: center; color: #999">暂无房屋数据，请先导入或新增</td>
-        </tr>
-      </tbody>
-    </table>
+    <VEmpty
+      v-else-if="!filtered.length"
+      title="暂无房屋数据"
+      message="可点击右上角「新增房屋」逐户录入，或通过 Excel 批量导入。"
+    >
+      <template #actions>
+        <VButton type="primary" @click="openAdd">新增房屋</VButton>
+      </template>
+    </VEmpty>
 
-    <div style="margin-top: 12px; color: #999; font-size: 13px">共 {{ filtered.length }} 户</div>
+    <template v-else>
+      <div class="pf-list">
+        <VEntityContainer>
+          <VEntity v-for="p in pageItems" :key="p.metadata.name">
+            <template #start>
+              <VEntityField
+                :title="houseLabel(p.spec)"
+                :description="`业主：${ownerNames(p.spec)}`"
+                :max-width="260"
+              />
+              <VEntityField :title="p.spec.propertyType || '住宅'" description="物业类型" :width="100" />
+              <VEntityField
+                :title="p.spec.area === undefined || p.spec.area === null ? '-' : `${p.spec.area}`"
+                description="面积(㎡)"
+                :width="96"
+              />
+              <VEntityField :title="p.spec.ownerPhone || '-'" description="手机号" :width="140" />
+            </template>
 
-    <!-- 导入弹窗 -->
-    <div v-if="showImport" style="position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 1000">
-      <div style="background: #fff; border-radius: 12px; padding: 24px; width: 600px; max-width: 92vw">
-        <h3 style="margin: 0 0 12px">📥 Excel 批量导入</h3>
-        <p style="font-size: 13px; color: #666; margin: 0 0 12px">
-          ① 下载模板 → ② 填好数据 → ③ 选择文件上传。模板列：小区、楼栋、单元、房号、面积、业主姓名、手机号、身份证号、业主类型(业主/租户)、入住日期、房屋状态(自住/出租/空置/装修)、物业类型(住宅/商铺/车位)。<br/>
-          同小区同楼栋同房号自动更新（不会重复新增）。
-        </p>
-        <button style="color: #1a4f9e; background: none; border: none; cursor: pointer; font-size: 14px; padding: 0" @click="downloadTemplate">⬇️ 下载 Excel 模板</button>
-        <div style="margin: 16px 0">
-          <input type="file" accept=".xlsx,.xls" @change="onFileChange" style="font-size: 14px" />
-        </div>
-        <div v-if="importResult" :style="{ background: importResult.includes('❌') ? '#fff2f0' : '#f6ffed', color: importResult.includes('❌') ? '#cf1322' : '#389e0d', padding: '10px', borderRadius: '6px', fontSize: '14px', marginBottom: '12px' }">
-          {{ importResult }}
-        </div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <button style="padding: 8px 16px; background: #bbb; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="showImport = false">关闭</button>
-          <button style="padding: 8px 16px; background: #0a2a5e; color: #fff; border: none; border-radius: 6px; cursor: pointer" :disabled="!file" @click="doImport">上传导入</button>
-        </div>
+            <template #end>
+              <VEntityField :width="110">
+                <template #description>
+                  <VStatusDot
+                    :state="houseStatusState(p.spec.houseStatus)"
+                    :text="p.spec.houseStatus || '自住'"
+                  />
+                </template>
+              </VEntityField>
+            </template>
+
+            <template #dropdownItems>
+              <VDropdownItem @click="openEdit(p)">编辑</VDropdownItem>
+              <VDropdownDivider />
+              <VDropdownItem type="danger" @click="remove(p)">删除</VDropdownItem>
+            </template>
+          </VEntity>
+        </VEntityContainer>
       </div>
-    </div>
 
-    <!-- 新增/编辑弹窗 -->
-    <div v-if="showAdd" style="position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 1000">
-      <div style="background: #fff; border-radius: 12px; padding: 24px; width: 560px; max-width: 92vw; max-height: 90vh; overflow-y: auto">
-        <h3 style="margin: 0 0 12px">{{ editing ? '✏️ 编辑房屋' : '➕ 新增房屋' }}</h3>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+      <VPagination
+        class="pf-list__pagination"
+        :page="page"
+        :size="size"
+        :total="filtered.length"
+        show-total
+        @update:page="onPageChange"
+        @update:size="onSizeChange"
+      />
+    </template>
+
+    <!-- 新增 / 编辑房屋 -->
+    <VModal
+      v-model:visible="showForm"
+      :title="editing ? '编辑房屋' : '新增房屋'"
+      :width="760"
+      mount-to-body
+      layer-closable
+      @close="closeForm"
+    >
+      <FormKit
+        ref="formRef"
+        id="pf-property-form"
+        type="form"
+        :actions="false"
+        @submit="onFormSubmit"
+      >
+        <div class="pf-form-grid">
           <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">小区 <b style="color:#cf1322">*</b></div>
-            <select v-model="newProp.community" @change="onCommunityChange" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
-              <option value="">请选择小区</option>
-              <option v-for="c in enabledCommunities" :key="c.metadata.name" :value="c.spec.name">{{ c.spec.name }}</option>
-            </select>
+            <FormKit
+              v-model="newProp.community"
+              name="community"
+              label="小区"
+              type="select"
+              placeholder="请选择小区"
+              :options="communityOptions"
+              validation="required"
+              @input="onCommunityChange"
+            />
           </div>
           <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">物业类型</div>
-            <select v-model="newProp.propertyType" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
-              <option value="住宅">住宅</option>
-              <option value="商铺">商铺</option>
-              <option value="车位">车位</option>
-              <option value="其他">其他</option>
-            </select>
+            <FormKit
+              v-model="newProp.propertyType"
+              name="propertyType"
+              label="物业类型"
+              type="select"
+              :options="propertyTypeOptions"
+            />
           </div>
           <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">楼栋 <b style="color:#cf1322">*</b>（取自小区配置）</div>
-            <select v-model="newProp.building" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
-              <option value="">请选择楼栋</option>
-              <option v-for="b in buildingOptions" :key="b" :value="b">{{ b }}</option>
-            </select>
-            <div v-if="!buildingOptions.length && newProp.community" style="font-size:12px;color:#cf1322;margin-top:2px">
-              该小区未配楼栋，请先到「小区配置」补充
+            <FormKit
+              v-model="newProp.building"
+              name="building"
+              label="楼栋"
+              type="select"
+              placeholder="请选择楼栋"
+              :options="buildingOptions"
+              validation="required"
+            />
+            <p v-if="!buildingOptions.length && newProp.community" class="pf-hint pf-hint--tight">
+              该小区尚未配置楼栋，请先到「小区配置」中补充。
+            </p>
+          </div>
+          <div>
+            <FormKit v-model="newProp.unit" name="unit" label="单元（选填）" type="text" placeholder="如 1 / 2" />
+          </div>
+          <div>
+            <FormKit
+              v-model="newProp.room"
+              name="room"
+              label="房号"
+              type="text"
+              placeholder="如 101 / 1202"
+              validation="required"
+            />
+          </div>
+          <div>
+            <FormKit
+              v-model.number="newProp.area"
+              name="area"
+              label="建筑面积(㎡)"
+              type="number"
+              placeholder="如 89.5"
+              validation="required|min:0.01"
+            />
+          </div>
+          <div>
+            <FormKit
+              v-model="newProp.moveInDate"
+              name="moveInDate"
+              label="入住日期（选填）"
+              type="date"
+            />
+          </div>
+          <div>
+            <FormKit
+              v-model="newProp.houseStatus"
+              name="houseStatus"
+              label="房屋状态"
+              type="select"
+              :options="houseStatusOptions"
+            />
+          </div>
+
+          <!-- 业主档案：同一房屋可登记多位业主 / 共有人 / 租户 -->
+          <div class="pf-form-grid__full">
+            <div class="pf-owner-card">
+              <div class="pf-owner-card__head">
+                <span class="pf-owner-card__title">业主档案</span>
+                <span class="pf-hint pf-hint--tight pf-hint--inline">
+                  同一房屋可登记多位业主 / 共有人 / 租户，标星号的为主业主（可缴费、收通知）
+                </span>
+                <span class="pf-owner-card__spacer"></span>
+                <VButton size="sm" @click="addOwner">
+                  <template #icon><IconAddCircle /></template>
+                  添加业主
+                </VButton>
+              </div>
+
+              <p v-if="!owners.length" class="pf-hint pf-hint--tight">
+                暂无业主，请点击右上角「添加业主」录入。
+              </p>
+
+              <div v-for="(o, i) in owners" :key="i" class="pf-owner-grid">
+                <div>
+                  <FormKit
+                    v-model="o.name"
+                    :name="`owner_${i}_name`"
+                    label="姓名"
+                    type="text"
+                    placeholder="姓名"
+                    validation="required"
+                  />
+                </div>
+                <div>
+                  <FormKit
+                    v-model="o.phone"
+                    :name="`owner_${i}_phone`"
+                    label="手机号"
+                    type="text"
+                    placeholder="手机号"
+                    validation="required|matches:/^1[3-9]\d{9}$/"
+                    :validation-messages="{ matches: '请输入正确的 11 位手机号' }"
+                  />
+                </div>
+                <div>
+                  <FormKit
+                    v-model="o.idCard"
+                    :name="`owner_${i}_idCard`"
+                    label="身份证（选填）"
+                    type="text"
+                    placeholder="身份证号"
+                  />
+                </div>
+                <div>
+                  <FormKit
+                    v-model="o.type"
+                    :name="`owner_${i}_type`"
+                    label="身份"
+                    type="select"
+                    :options="ownerTypeOptions"
+                  />
+                </div>
+                <div class="pf-owner-grid__actions">
+                  <VButton
+                    size="sm"
+                    :type="o.isPrimary ? 'primary' : 'secondary'"
+                    @click="setPrimary(i)"
+                  >
+                    {{ o.isPrimary ? '主业主' : '设为主业主' }}
+                  </VButton>
+                  <VButton size="sm" type="danger" ghost @click="removeOwner(i)">移除</VButton>
+                </div>
+              </div>
             </div>
           </div>
-          <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">单元（选填）</div>
-            <input v-model="newProp.unit" placeholder="如 1 / 2" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
+
+          <div class="pf-form-grid__full">
+            <FormKit v-model="newProp.remark" name="remark" label="备注（选填）" type="textarea" rows="2" />
           </div>
-          <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">房号 <b style="color:#cf1322">*</b></div>
-            <input v-model="newProp.room" placeholder="如 101 / 1202" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
-          </div>
-          <div>
-            <div style="font-size:12px;color:#66788f;margin-bottom:4px">面积(㎡) <b style="color:#cf1322">*</b></div>
-            <input v-model.number="newProp.area" type="number" placeholder="如 89.5" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
-          </div>
-          <div style="grid-column: span 2; margin-top: 6px; border: 1px solid #e3e9f5; border-radius: 8px; padding: 10px 12px; background: #fafcff">
-            <div style="display:flex;align-items:center;margin-bottom:8px">
-              <span style="font-size:13px;font-weight:600;color:#0a2a5e">👥 业主档案（同一房屋可登记多位业主/共有人/租户）</span>
-              <div style="flex:1"></div>
-              <button style="padding:4px 10px;background:#f0f4ff;border:1px dashed #1a4f9e;color:#1a4f9e;border-radius:6px;cursor:pointer;font-size:12px" @click="owners.push({ name:'', phone:'', idCard:'', type:'业主', isPrimary:false })">＋ 添加业主</button>
-            </div>
-            <div v-for="(o, i) in owners" :key="i" style="display:grid;grid-template-columns:110px 1fr 1fr 90px 36px;gap:6px;margin-bottom:6px;align-items:center">
-              <input v-model="o.name" placeholder="姓名" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
-              <input v-model="o.phone" placeholder="手机号" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
-              <input v-model="o.idCard" placeholder="身份证(选填)" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px" />
-              <select v-model="o.type" style="padding:6px 8px;border:1px solid #d0d7e2;border-radius:6px;font-size:13px">
-                <option value="业主">业主</option>
-                <option value="共有人">共有人</option>
-                <option value="租户">租户</option>
-                <option value="亲属">亲属</option>
-              </select>
-              <button :title="o.isPrimary ? '主业主（可缴费/收通知）' : '设为主业主'" style="background:none;border:none;cursor:pointer;font-size:16px" @click="setPrimary(i)">{{ o.isPrimary ? '⭐' : '☆' }}</button>
-            </div>
-            <div v-if="!owners.length" style="font-size:12px;color:#99a3b3">暂无业主，请点击右上「＋ 添加业主」录入（第一位默认为主业主，⭐ 表示主业主）</div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;grid-column:span 2">
-            <div>
-              <div style="font-size:12px;color:#66788f;margin-bottom:4px">入住日期（选填）</div>
-              <input v-model="newProp.moveInDate" type="date" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box" />
-            </div>
-            <div>
-              <div style="font-size:12px;color:#66788f;margin-bottom:4px">房屋状态</div>
-              <select v-model="newProp.houseStatus" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px">
-                <option value="自住">自住</option>
-                <option value="出租">出租</option>
-                <option value="空置">空置</option>
-                <option value="装修">装修</option>
-              </select>
-            </div>
-          </div>
-          <input v-model="newProp.remark" placeholder="备注" style="width:100%;padding:8px 10px;border:1px solid #d0d7e2;border-radius:6px;box-sizing:border-box;grid-column:span 2" />
         </div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px">
-          <button style="padding: 8px 16px; background: #bbb; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="showAdd = false">取消</button>
-          <button style="padding: 8px 16px; background: #389e0d; color: #fff; border: none; border-radius: 6px; cursor: pointer" @click="saveProperty">保存</button>
+      </FormKit>
+
+      <template #footer>
+        <div class="pf-modal-footer">
+          <VButton :disabled="saving" @click="closeForm">取消</VButton>
+          <VButton type="primary" :loading="saving" @click="submitForm">保存</VButton>
         </div>
+      </template>
+    </VModal>
+
+    <!-- Excel 批量导入 -->
+    <VModal
+      v-model:visible="showImport"
+      title="Excel 批量导入"
+      :width="600"
+      mount-to-body
+      layer-closable
+      @close="closeImport"
+    >
+      <p class="pf-hint">
+        ① 下载模板 → ② 按模板填写数据 → ③ 选择文件上传。同小区、同楼栋、同房号会自动更新，不会重复新增。
+      </p>
+
+      <div class="pf-import-actions">
+        <VButton @click="downloadTemplate">
+          <template #icon><IconDownload /></template>
+          下载 Excel 模板
+        </VButton>
       </div>
-    </div>
+
+      <FormKit
+        v-model="importFiles"
+        name="excel"
+        label="选择 Excel 文件（.xlsx / .xls）"
+        type="file"
+        accept=".xlsx,.xls"
+        @input="onFileInput"
+      />
+
+      <div
+        v-if="importResult"
+        class="pf-import-result"
+        :class="importOk ? 'pf-import-result--ok' : 'pf-import-result--err'"
+      >
+        {{ importResult }}
+      </div>
+
+      <template #footer>
+        <div class="pf-modal-footer">
+          <VButton :disabled="importing" @click="closeImport">关闭</VButton>
+          <VButton type="primary" :loading="importing" :disabled="!file" @click="doImport">
+            上传导入
+          </VButton>
+        </div>
+      </template>
+    </VModal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import { computed, onMounted, ref } from 'vue'
+import {
+  VButton,
+  VDropdownDivider,
+  VDropdownItem,
+  VEmpty,
+  VEntity,
+  VEntityContainer,
+  VEntityField,
+  VLoading,
+  VModal,
+  VPagination,
+  VStatusDot,
+  Dialog,
+  Toast,
+  IconAddCircle,
+  IconRefreshLine,
+  IconRiUpload2Fill,
+} from '@halo-dev/components'
+import IconDownload from '~icons/ri/download-2-line'
+import axios, { API_BASE, API_VERSION, errMsg } from '@/utils/api'
 
-const API_BASE = '/apis/console.api.propertyfee.halo.run/v1alpha1'
+interface Owner {
+  name: string
+  phone: string
+  idCard: string
+  type: string
+  isPrimary: boolean
+}
+
+const loading = ref(false)
+const saving = ref(false)
+const importing = ref(false)
+
 const items = ref<any[]>([])
 const communities = ref<any[]>([])
-const owners = ref<any[]>([])
-const filter = ref({ community: '', building: '', room: '', ownerName: '' })
-const showImport = ref(false)
-const showAdd = ref(false)
-const editing = ref<any>(null)
-const file = ref<File | null>(null)
-const importResult = ref('')
 
-const enabledCommunities = computed(() => communities.value.filter((c) => c.spec?.enabled !== false))
+const filter = ref({ community: '', building: '', room: '', ownerName: '' })
+const page = ref(1)
+const size = ref(20)
+
+const showForm = ref(false)
+const showImport = ref(false)
+const editing = ref<any>(null)
+const formRef = ref<any>(null)
+const file = ref<File | null>(null)
+const importFiles = ref<any>(null)
+const importResult = ref('')
+const importOk = ref(false)
+const owners = ref<Owner[]>([])
+
+/* ------------------------------- 选项 ------------------------------- */
+const propertyTypeOptions = ['住宅', '商铺', '车位', '其他'].map((v) => ({ label: v, value: v }))
+const houseStatusOptions = ['自住', '出租', '空置', '装修'].map((v) => ({ label: v, value: v }))
+const ownerTypeOptions = ['业主', '共有人', '租户', '亲属'].map((v) => ({ label: v, value: v }))
+
+const enabledCommunities = computed(() =>
+  communities.value.filter((c) => c.spec?.enabled !== false)
+)
+const communityOptions = computed(() =>
+  enabledCommunities.value.map((c) => ({ label: c.spec?.name || '', value: c.spec?.name || '' }))
+)
 const buildingOptions = computed(() => {
-  const c = communities.value.find((x) => x.spec?.name === newProp.value.community)
-  return c?.spec?.buildings || []
+  const c = enabledCommunities.value.find((x) => x.spec?.name === newProp.value.community)
+  return (c?.spec?.buildings || []).map((b: string) => ({ label: b, value: b }))
 })
 
+/* ------------------------------- 表单状态 ------------------------------- */
 const emptyProp = () => ({
-  community: '', building: '', unit: '', room: '', area: 0,
-  propertyType: '住宅', ownerName: '', ownerPhone: '', ownerIdCard: '',
-  ownerType: '业主', moveInDate: '', houseStatus: '自住', remark: '',
-  owners: [] as any[],
+  community: '',
+  building: '',
+  unit: '',
+  room: '',
+  area: undefined as number | undefined,
+  propertyType: '住宅',
+  ownerName: '',
+  ownerPhone: '',
+  ownerIdCard: '',
+  ownerType: '业主',
+  moveInDate: '',
+  houseStatus: '自住',
+  remark: '',
+  owners: [] as Owner[],
 })
 const newProp = ref(emptyProp())
 
 const filtered = computed(() => {
+  const f = filter.value
+  const kw = (v: unknown) => String(v ?? '').toLowerCase()
+  const hit = (needle: string, haystack: unknown) =>
+    !needle || kw(haystack).includes(needle.toLowerCase())
   return items.value.filter((p) => {
     const s = p.spec || {}
-    return (!filter.value.community || (s.community || '').includes(filter.value.community))
-      && (!filter.value.building || (s.building || '').includes(filter.value.building))
-      && (!filter.value.room || (s.room || '').includes(filter.value.room))
-      && (!filter.value.ownerName || (s.ownerName || '').includes(filter.value.ownerName))
+    return (
+      hit(f.community, s.community) &&
+      hit(f.building, s.building) &&
+      hit(f.room, s.room) &&
+      hit(f.ownerName, s.ownerName) &&
+      hit(f.ownerName, (s.owners || []).map((o: Owner) => o?.name).join('、'))
+    )
   })
 })
 
+const pageItems = computed(() => {
+  const start = (page.value - 1) * size.value
+  return filtered.value.slice(start, start + size.value)
+})
+
+/* ------------------------------- 数据加载 ------------------------------- */
 async function load() {
+  loading.value = true
   try {
     const res = await axios.get(`${API_BASE}/properties`)
     items.value = res.data.items || []
-  } catch (e: any) {
-    alert('加载失败: ' + (e.response?.data?.message || e.message))
+    syncPage()
+  } catch (e) {
+    Toast.error(errMsg(e, '房屋列表加载失败'))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -225,113 +454,235 @@ async function loadCommunities() {
   try {
     const res = await axios.get(`${API_BASE}/communities`)
     communities.value = res.data.items || []
-  } catch (e: any) {
-    // 老版本接口不存在时忽略（表单退化为自由填写由后端兼容）
+  } catch {
+    // 老版本后端无 communities 接口时忽略，表单退化为可自由填写由后端兼容
     communities.value = []
   }
+}
+
+function syncPage() {
+  const maxPage = Math.max(1, Math.ceil(filtered.value.length / size.value))
+  if (page.value > maxPage) page.value = maxPage
+}
+
+function onPageChange(next: number) {
+  page.value = next
+}
+
+function onSizeChange(next: number) {
+  size.value = next
+  page.value = 1
 }
 
 function onCommunityChange() {
   newProp.value.building = ''
 }
 
-function setPrimary(i: number) {
-  owners.value.forEach((o, idx) => (o.isPrimary = idx === i))
-}
-
-function syncOwnersToSpec() {
-  const clean = owners.value
-    .map((o) => ({ name: (o.name || '').trim(), phone: (o.phone || '').trim(), idCard: (o.idCard || '').trim(), type: o.type || '业主', isPrimary: !!o.isPrimary }))
-    .filter((o) => o.name || o.phone)
-  if (!clean.length) {
-    clean.push({ name: '', phone: '', idCard: '', type: '业主', isPrimary: true })
-  }
-  if (!clean.some((o) => o.isPrimary)) clean[0].isPrimary = true
-  const p = clean.find((o) => o.isPrimary) || clean[0]
-  newProp.value.owners = clean
-  newProp.value.ownerName = p.name
-  newProp.value.ownerPhone = p.phone
-  newProp.value.ownerIdCard = p.idCard
-  newProp.value.ownerType = p.type || '业主'
-}
-
+/* ------------------------------- 弹窗 ------------------------------- */
 function openAdd() {
   editing.value = null
   newProp.value = emptyProp()
   owners.value = [{ name: '', phone: '', idCard: '', type: '业主', isPrimary: true }]
-  showAdd.value = true
+  showForm.value = true
 }
 
 function openEdit(p: any) {
   editing.value = p
   const spec = JSON.parse(JSON.stringify(p.spec || {}))
   newProp.value = { ...emptyProp(), ...spec }
-  if (!spec.owners || !spec.owners.length) {
-    // 老数据：单业主字段回填为第一行业主
-    owners.value = [{ name: spec.ownerName || '', phone: spec.ownerPhone || '', idCard: spec.ownerIdCard || '', type: spec.ownerType || '业主', isPrimary: true }]
-  } else {
-    owners.value = spec.owners.map((o: any) => ({ ...o }))
+  const list: Owner[] = Array.isArray(spec.owners) && spec.owners.length
+    ? spec.owners.map((o: any) => ({
+        name: o?.name || '',
+        phone: o?.phone || '',
+        idCard: o?.idCard || '',
+        type: o?.type || '业主',
+        isPrimary: !!o?.isPrimary,
+      }))
+    : [
+        {
+          name: spec.ownerName || '',
+          phone: spec.ownerPhone || '',
+          idCard: spec.ownerIdCard || '',
+          type: spec.ownerType || '业主',
+          isPrimary: true,
+        },
+      ]
+  if (!list.some((o) => o.isPrimary)) list[0].isPrimary = true
+  owners.value = list
+  showForm.value = true
+}
+
+function closeForm() {
+  showForm.value = false
+  editing.value = null
+  owners.value = []
+}
+
+function addOwner() {
+  owners.value.push({
+    name: '',
+    phone: '',
+    idCard: '',
+    type: '业主',
+    isPrimary: owners.value.length === 0,
+  })
+}
+
+function removeOwner(i: number) {
+  const wasPrimary = owners.value[i]?.isPrimary
+  owners.value.splice(i, 1)
+  if (wasPrimary && owners.value.length && !owners.value.some((o) => o.isPrimary)) {
+    owners.value[0].isPrimary = true
   }
-  if (!owners.value.some((o) => o.isPrimary)) owners.value[0].isPrimary = true
-  showAdd.value = true
+}
+
+function setPrimary(i: number) {
+  owners.value.forEach((o, idx) => (o.isPrimary = idx === i))
+}
+
+/** 提交：优先走 FormKit 节点（触发校验与错误提示），节点不可用时兜底直存 */
+function submitForm() {
+  const node = formRef.value?.node
+  if (node && typeof node.submit === 'function') {
+    node.submit()
+    return
+  }
+  void saveProperty()
+}
+
+function onFormSubmit() {
+  void saveProperty()
+}
+
+function syncOwnersToSpec() {
+  const clean: Owner[] = owners.value
+    .map((o) => ({
+      name: (o.name || '').trim(),
+      phone: (o.phone || '').trim(),
+      idCard: (o.idCard || '').trim(),
+      type: o.type || '业主',
+      isPrimary: !!o.isPrimary,
+    }))
+    .filter((o) => o.name || o.phone)
+  if (!clean.length) {
+    clean.push({ name: '', phone: '', idCard: '', type: '业主', isPrimary: true })
+  }
+  if (!clean.some((o) => o.isPrimary)) clean[0].isPrimary = true
+  const primary = clean.find((o) => o.isPrimary) || clean[0]
+  newProp.value.owners = clean
+  newProp.value.ownerName = primary.name
+  newProp.value.ownerPhone = primary.phone
+  newProp.value.ownerIdCard = primary.idCard
+  newProp.value.ownerType = primary.type || '业主'
 }
 
 async function saveProperty() {
+  if (saving.value) return
   if (!newProp.value.community || !newProp.value.building || !newProp.value.room) {
-    alert('请选择小区、楼栋并填写房号')
+    Toast.warning('请选择小区、楼栋并填写房号')
     return
   }
-  if (!newProp.value.area || newProp.value.area <= 0) {
-    alert('请填写建筑面积')
+  if (!newProp.value.area || Number(newProp.value.area) <= 0) {
+    Toast.warning('请填写建筑面积')
     return
   }
   syncOwnersToSpec()
+
+  saving.value = true
   try {
     if (editing.value) {
       await axios.put(`${API_BASE}/properties/${editing.value.metadata.name}`, {
-        apiVersion: 'propertyfee.halo.run/v1alpha1',
+        apiVersion: API_VERSION,
         kind: 'Property',
-        metadata: { name: editing.value.metadata.name, version: editing.value.metadata.version },
+        metadata: {
+          name: editing.value.metadata.name,
+          version: editing.value.metadata.version,
+        },
         spec: { ...newProp.value },
       })
     } else {
       await axios.post(`${API_BASE}/properties`, {
-        apiVersion: 'propertyfee.halo.run/v1alpha1',
+        apiVersion: API_VERSION,
         kind: 'Property',
         spec: { ...newProp.value },
       })
     }
-    showAdd.value = false
-    load()
-  } catch (e: any) {
-    alert('保存失败: ' + (e.response?.data?.message || e.message))
+    Toast.success(editing.value ? '房屋信息已更新' : '房屋已创建')
+    closeForm()
+    await load()
+  } catch (e) {
+    Toast.error(errMsg(e, '保存失败'))
+  } finally {
+    saving.value = false
   }
 }
 
-function onFileChange(e: Event) {
-  const el = e.target as HTMLInputElement
-  file.value = el.files?.[0] || null
+/* ------------------------------- 删除 ------------------------------- */
+function remove(p: any) {
+  Dialog.warning({
+    title: '删除房屋',
+    description: `确认删除「${p.spec?.community || ''} ${p.spec?.building || ''}栋 ${p.spec?.room || ''}」？该操作不可恢复。`,
+    confirmText: '删除',
+    onConfirm: async () => {
+      try {
+        await axios.delete(`${API_BASE}/properties/${p.metadata.name}`)
+        Toast.success('房屋已删除')
+        await load()
+      } catch (e) {
+        Toast.error(errMsg(e, '删除失败'))
+      }
+    },
+  })
+}
+
+/* ------------------------------- Excel 导入 ------------------------------- */
+function openImport() {
+  showImport.value = true
+  file.value = null
+  importFiles.value = null
+  importResult.value = ''
+}
+
+function closeImport() {
+  showImport.value = false
+  file.value = null
+  importFiles.value = null
+}
+
+function onFileInput(payload: any) {
+  const list: File[] = Array.isArray(payload) ? payload : payload ? [payload] : []
+  file.value = list[0] || null
   importResult.value = ''
 }
 
 async function doImport() {
-  if (!file.value) return
+  if (!file.value) {
+    Toast.warning('请先选择 Excel 文件')
+    return
+  }
+  importing.value = true
   try {
     const buf = await file.value.arrayBuffer()
     const rows = await parseExcel(buf)
     if (!rows.length) {
-      importResult.value = '未解析到有效数据，请检查模板格式'
+      importOk.value = false
+      importResult.value = '未解析到有效数据，请检查是否使用了正确的模板。'
       return
     }
     const res = await axios.post(`${API_BASE}/properties/import`, { rows })
-    importResult.value = `✅ 导入完成：新增/更新 ${res.data.created} 条，跳过 ${res.data.skipped} 条`
-    load()
-  } catch (e: any) {
-    importResult.value = '❌ 导入失败: ' + (e.response?.data?.message || e.message)
+    importOk.value = true
+    importResult.value = `导入完成：新增/更新 ${res.data.created} 条，跳过 ${res.data.skipped} 条。`
+    Toast.success('Excel 导入完成')
+    await load()
+  } catch (e) {
+    importOk.value = false
+    importResult.value = `导入失败：${errMsg(e)}`
+    Toast.error(errMsg(e, '导入失败'))
+  } finally {
+    importing.value = false
   }
 }
 
-// Excel 解析（前端读取 xlsx：通过 SheetJS）
 async function parseExcel(buf: ArrayBuffer): Promise<any[]> {
   const XLSX = await loadXlsx()
   const workbook = XLSX.read(buf, { type: 'array' })
@@ -367,7 +718,7 @@ function loadXlsx(): Promise<any> {
   return xlsxPromise
 }
 
-// 前端生成 Excel 模板并下载（不依赖后端静态资源）
+/** 前端实时生成模板并下载，不依赖后端静态资源（避免 404） */
 async function downloadTemplate() {
   try {
     const XLSX = await loadXlsx()
@@ -380,40 +731,48 @@ async function downloadTemplate() {
       '532621198001010011', '业主', '2024-06-01', '自住', '住宅', '',
     ]
     const ws = XLSX.utils.aoa_to_sheet([header, example])
-    ws['!cols'] = header.map((h) => ({ wch: h.length >= 8 ? h.length * 2.2 : 12 }))
+    ws['!cols'] = header.map((h: string) => ({ wch: h.length >= 8 ? h.length * 2.2 : 12 }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '房屋导入模板')
     XLSX.writeFile(wb, 'property-import-template.xlsx')
-  } catch (e: any) {
-    alert('模板生成失败: ' + (e?.message || e))
+  } catch (e) {
+    Toast.error(errMsg(e, '模板生成失败'))
   }
 }
 
-async function remove(p: any) {
-  if (!confirm(`确认删除 ${p.spec.community} ${p.spec.building}栋 ${p.spec.room}？`)) return
-  try {
-    await axios.delete(`${API_BASE}/properties/${p.metadata.name}`)
-    load()
-  } catch (e: any) {
-    alert('删除失败: ' + (e.response?.data?.message || e.message))
-  }
+/* ------------------------------- 展示辅助 ------------------------------- */
+function houseLabel(spec: any): string {
+  if (!spec) return '-'
+  const unit = spec.unit ? `${spec.unit}单元` : ''
+  return `${spec.community || '-'} ${spec.building || '-'}栋${unit}${spec.room || ''}`
 }
 
-function ownerNames(s: any) {
-  if (!s) return '-'
-  if (s.owners && s.owners.length) {
-    const names = s.owners.map((o: any) => o.name).filter(Boolean)
-    return names.length ? names.join('、') : (s.ownerName || '-')
+function ownerNames(spec: any): string {
+  if (!spec) return '-'
+  if (Array.isArray(spec.owners) && spec.owners.length) {
+    const names = spec.owners.map((o: any) => o?.name).filter(Boolean)
+    if (names.length) return names.join('、')
   }
-  return s.ownerName || '-'
+  return spec.ownerName || '-'
 }
 
-function statusColor(s: string | undefined) {
-  return { 自住: '#389e0d', 出租: '#1a4f9e', 空置: '#999', 装修: '#d48806' }[s || '自住'] || '#666'
+function houseStatusState(status?: string): 'default' | 'success' | 'warning' | 'error' {
+  switch (status) {
+    case '自住':
+      return 'success'
+    case '出租':
+      return 'default'
+    case '装修':
+      return 'warning'
+    case '空置':
+      return 'error'
+    default:
+      return 'default'
+  }
 }
 
 onMounted(() => {
-  load()
-  loadCommunities()
+  void load()
+  void loadCommunities()
 })
 </script>

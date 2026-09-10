@@ -1,0 +1,370 @@
+/* =============================================================================
+ * 物业费管理插件 · 控制台前端补充样式
+ *
+ * 设计原则（对齐 Halo 应用市场审核第 7 条）：
+ * 1. 组件外观一律复用 Halo 官方 @halo-dev/components（VPageHeader / VCard /
+ *    VButton / VModal / VEntity* / VEmpty / VLoading / VPagination / VTag /
+ *    VStatusDot 等），表单一律复用 Halo 全局注册的 FormKit。
+ * 2. 本文件只保留「插件自身布局」所需的少量补充类，统一使用 `pf-` 前缀，
+ *    避免污染 Halo 控制台既有样式。
+ * 3. 不使用 Halo 控制台的 Tailwind 类：控制台 Tailwind 是 JIT 按需生成，
+ *    不包含插件用到的类，依赖它会导致布局塌陷。
+ * 4. Halo 控制台只会加载插件的 main.js（不会加载 style.css），因此本文件
+ *    在 src/index.ts 中以 `?inline` 方式导入并手动注入 <style>。
+ *
+ * 布局约束：所有多列栅格使用 minmax(0, 1fr) + min-width: 0，
+ * 并在 ≤768px 时降为单列/双列，保证桌面与窄屏均不溢出、不截断。
+ * ========================================================================== */
+
+:root {
+  --pf-border-color: rgba(0, 0, 0, 0.09);
+  --pf-text: #1f2937;
+  --pf-text-muted: #6b7280;
+  --pf-radius: var(--borderRadius-base, 4px);
+  --pf-primary: rgb(var(--colors-primary, 76 203 160));
+  --pf-danger: rgb(var(--colors-danger, 215 29 29));
+}
+
+/* ---------------------------------------------------------------------------
+ * 页面容器
+ * ------------------------------------------------------------------------ */
+.pf-view {
+  width: 100%;
+  min-width: 0;
+}
+
+/* VCard 之间统一间距 */
+.pf-view .pf-card-gap {
+  margin-bottom: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 工具栏：关键词筛选 + 操作按钮
+ * ------------------------------------------------------------------------ */
+.pf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pf-toolbar__fields {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pf-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 单个筛选输入：桌面固定宽度，窄屏自适应换行 */
+.pf-filter {
+  min-width: 0;
+}
+
+.pf-filter .formkit-outer {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (min-width: 769px) {
+  .pf-filter {
+    width: 176px;
+  }
+}
+
+@media (max-width: 768px) {
+  .pf-filter {
+    flex: 1 1 140px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 列表容器
+ * Halo 的 VEntityContainer 依赖少量 Tailwind 原子类；这里补一层兜底，
+ * 保证即使用户主题/控制台未生成这些类，列表依然有完整的行分隔与横向滚动。
+ * ------------------------------------------------------------------------ */
+.pf-list {
+  width: 100%;
+  min-width: 0;
+}
+
+.pf-list > div {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.pf-list table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.pf-list tbody > tr + tr {
+  border-top: 1px solid #f3f4f6;
+}
+
+.pf-list__pagination {
+  margin-top: 12px;
+}
+
+/* 行内标签组（楼栋、额外费用等） */
+.pf-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* VEntity 行内展示的状态文字 */
+.pf-inline-state {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * 提示文字
+ * ------------------------------------------------------------------------ */
+.pf-hint {
+  margin: 0 0 12px;
+  color: var(--pf-text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.pf-hint--tight {
+  margin: 0;
+}
+
+.pf-hint--inline {
+  display: inline-block;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * 统计卡片（报表页总览）
+ * ------------------------------------------------------------------------ */
+.pf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.pf-stat {
+  padding: 16px 12px;
+  text-align: center;
+}
+
+.pf-stat__value {
+  color: var(--pf-text);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  word-break: break-all;
+}
+
+.pf-stat__label {
+  margin-top: 4px;
+  color: var(--pf-text-muted);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 弹窗表单
+ * ------------------------------------------------------------------------ */
+.pf-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 表单内部栅格：桌面两列，窄屏单列 */
+.pf-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pf-form-grid > * {
+  min-width: 0;
+}
+
+.pf-form-grid__full {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.pf-form-grid .formkit-outer {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .pf-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pf-form-grid__full {
+    grid-column: auto;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 业主档案（新增/编辑房屋弹窗）
+ * 修复审核问题：业主字段横向截断
+ * —— 使用 minmax(0, 1fr) + min-width: 0，桌面 4 列 + 操作列，
+ *    ≤768px 降为两列并把「主业主」操作独占一行。
+ * ------------------------------------------------------------------------ */
+.pf-owner-card {
+  border: 1px solid var(--pf-border-color);
+  border-radius: var(--pf-radius);
+  padding: 12px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+
+.pf-owner-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pf-owner-card__title {
+  color: var(--pf-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pf-owner-card__spacer {
+  flex: 1 1 auto;
+}
+
+.pf-owner-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 0.9fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.pf-owner-grid > * {
+  min-width: 0;
+}
+
+.pf-owner-grid .formkit-outer {
+  margin: 0;
+  min-width: 0;
+}
+
+.pf-owner-grid__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 窄屏：两列布局，操作列独占整行，避免按钮/字段被压缩截断 */
+@media (max-width: 768px) {
+  .pf-owner-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .pf-owner-grid__actions {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 导入弹窗
+ * ------------------------------------------------------------------------ */
+.pf-import-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--pf-radius);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.pf-import-result--ok {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.pf-import-result--err {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.pf-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 报表页表头（VCard 内标题行）
+ * ------------------------------------------------------------------------ */
+.pf-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--pf-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * 报表页：待核实到账的线下缴费记录高亮 + 行内审核操作
+ * ------------------------------------------------------------------------ */
+.pf-record--pending {
+  background: #fffbeb;
+  box-shadow: inset 3px 0 0 0 #f59e0b;
+}
+
+.pf-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 系统配置：密钥「清除该密钥」开关行
+ * ------------------------------------------------------------------------ */
+.pf-secret-clear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pf-secret-clear__label {
+  color: var(--pf-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pf-secret-clear__hint {
+  color: var(--pf-text-muted);
+  font-size: 12px;
+}

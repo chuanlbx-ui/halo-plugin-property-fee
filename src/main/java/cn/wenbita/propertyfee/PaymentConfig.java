@@ -56,6 +56,15 @@ public class PaymentConfig extends AbstractExtension {
         /** 商户私钥（apiclient_key.pem 内容，PEM 格式，微信渠道）。 */
         private String mchPrivateKey;
 
+        /**
+         * 微信支付公钥（PEM，商户平台「API 安全 → 微信支付公钥」下载）。
+         * 公钥模式商户（回调头 Wechatpay-Serial 形如 PUB_KEY_ID_…）必填，用于回调验签。密文存储。
+         */
+        private String wxPayPublicKey;
+
+        /** 微信支付公钥 ID（形如 PUB_KEY_ID_011340273901…，需与回调头 Wechatpay-Serial 一致）。 */
+        private String wxPayPublicKeyId;
+
         /** 支付回调通知地址（公网可访问）。 */
         private String notifyUrl;
 
