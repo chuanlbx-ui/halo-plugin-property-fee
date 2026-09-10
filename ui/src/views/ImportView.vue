@@ -138,25 +138,3 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 </script>
-
-<style scoped>
-.pf-import {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.pf-import__file {
-  border: 1px dashed #c9d2e0;
-  border-radius: 8px;
-  padding: 14px;
-  width: 100%;
-}
-.pf-import__hint {
-  color: #8a94a6;
-}
-.pf-import__actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-</style>

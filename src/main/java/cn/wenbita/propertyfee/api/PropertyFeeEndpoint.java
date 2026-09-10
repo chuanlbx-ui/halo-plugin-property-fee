@@ -24,6 +24,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
 import run.halo.app.extension.Extension;
@@ -54,6 +55,9 @@ import cn.wenbita.propertyfee.WechatPayService;
 @Component
 @AllArgsConstructor
 public class PropertyFeeEndpoint implements CustomEndpoint {
+
+    private static final org.slf4j.Logger log =
+        org.slf4j.LoggerFactory.getLogger(PropertyFeeEndpoint.class);
 
     private final ReactiveExtensionClient client;
     private final WechatPayService wechatPayService;
@@ -1331,8 +1335,37 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     }
 
     /**
-     * 首次微信使用绑定：微信 openid + 业主手机号 + 短信验证码。
-     * 校验短信码成功后把 openid 写入该业主名下（所有含该手机号的房屋同步绑定），返回业主令牌。
+     * 把 openid 写入所有含该手机号的房屋（响应式串行写入，禁止 block）。
+     * 至少成功写入一条才算成功，否则报错交由前端提示。
+     */
+    private Mono<Long> bindOpenidToOwners(List<Property> all, String phone, String openid) {
+        List<Property> targets = new java.util.ArrayList<>();
+        for (Property p : all) {
+            if (PropertyHelper.isOwnerPhone(p, phone)
+                && PropertyHelper.setOwnerWxOpenid(p.getSpec(), phone, openid)) {
+                targets.add(p);
+            }
+        }
+        if (targets.isEmpty()) {
+            return Mono.error(new PropertyFeeException("绑定失败，请重试（未找到可绑定的业主记录）"));
+        }
+        return Flux.fromIterable(targets)
+            .concatMap(p -> client.update(p)
+                .doOnError(e -> log.warn("[property-fee] 微信绑定写入失败 {}: {}",
+                    p.getMetadata().getName(), e.getMessage()))
+                .onErrorResume(e -> Mono.empty()))
+            .count()
+            .flatMap(n -> {
+                if (n == null || n == 0L) {
+                    return Mono.<Long>error(new PropertyFeeException("绑定失败，请重试"));
+                }
+                return Mono.just(n);
+            });
+    }
+
+    /**
+     * 首次微信使用绑定：微信 openid + 业主手机号 +（免验证码通道：业主姓名比对 / 短信验证码通道）。
+     * 校验通过后把 openid 写入该业主名下（所有含该手机号的房屋同步绑定），返回业主令牌。
      */
     private Mono<ServerResponse> wxBind(ServerRequest request) {
         return parseBody(request, Map.class)
@@ -1375,43 +1408,29 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                         clearBindFailure(phone);
                         token = ownerAuthService.issueTokenByPhone(phone);
                     }
-                    // 绑定 openid 到所有含该手机号的房屋
-                    boolean bound = false;
-                    for (Property p : all) {
-                        if (PropertyHelper.isOwnerPhone(p, phone)) {
-                            Property.PropertySpec spec = p.getSpec();
-                            if (PropertyHelper.setOwnerWxOpenid(spec, phone, openid)) {
-                                p.setSpec(spec);
-                                try {
-                                    client.update(p).block();
-                                    bound = true;
-                                } catch (Exception ignore) {
-                                    // 单条失败不阻断其余
-                                }
-                            }
-                        }
-                    }
-                    if (!bound) {
-                        return Mono.error(new PropertyFeeException("绑定失败，请重试"));
-                    }
-                    return listAll(Property.class).flatMap(updated -> {
-                        String name = updated.stream()
-                            .filter(p -> PropertyHelper.isOwnerPhone(p, phone))
-                            .map(p -> {
-                                Property.Owner o = PropertyHelper.effectiveOwners(p.getSpec())
-                                    .stream().filter(x -> phone.equals(
-                                        PropertyHelper.normalizePhone(x.getPhone())))
-                                    .findFirst().orElse(null);
-                                return o == null || o.getName() == null ? "" : o.getName();
-                            }).filter(s -> hasText(s)).findFirst().orElse("");
-                        Map<String, Object> ok = new java.util.HashMap<>();
-                        ok.put("success", true);
-                        ok.put("message", "绑定成功，欢迎回来");
-                        ok.put("token", token);
-                        ok.put("phone", phone);
-                        ok.put("name", name);
-                        return ServerResponse.ok().bodyValue(ok);
-                    });
+                    // 绑定 openid 到所有含该手机号的房屋（响应式串行写入，禁用 block）
+                    return bindOpenidToOwners(all, phone, openid)
+                        .then(listAll(Property.class))
+                        .flatMap(updated -> {
+                            // 姓名优先用登录时填写的（免验证码通道），否则取档案里的业主姓名
+                            String name = hasText(nameRaw) ? nameRaw
+                                : updated.stream()
+                                .filter(p -> PropertyHelper.isOwnerPhone(p, phone))
+                                .map(p -> {
+                                    Property.Owner o = PropertyHelper.effectiveOwners(p.getSpec())
+                                        .stream().filter(x -> phone.equals(
+                                            PropertyHelper.normalizePhone(x.getPhone())))
+                                        .findFirst().orElse(null);
+                                    return o == null || o.getName() == null ? "" : o.getName();
+                                }).filter(s -> hasText(s)).findFirst().orElse("");
+                            Map<String, Object> ok = new java.util.HashMap<>();
+                            ok.put("success", true);
+                            ok.put("message", "绑定成功，欢迎回来");
+                            ok.put("token", token);
+                            ok.put("phone", phone);
+                            ok.put("name", name);
+                            return ServerResponse.ok().bodyValue(ok);
+                        });
                 });
             })
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
