@@ -1,4 +1,4 @@
-package run.halo.propertyfee.api;
+package cn.wenbita.propertyfee.api;
 
 import static org.springdoc.core.fn.builders.apiresponse.Builder.responseBuilder;
 import static org.springdoc.core.fn.builders.content.Builder.contentBuilder;
@@ -32,18 +32,19 @@ import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.propertyfee.FeeQueryRequest;
-import run.halo.propertyfee.FeeRecord;
-import run.halo.propertyfee.FeeStandard;
-import run.halo.propertyfee.OwnerAuthService;
-import run.halo.propertyfee.PayOrderRequest;
-import run.halo.propertyfee.PaymentConfig;
-import run.halo.propertyfee.Property;
-import run.halo.propertyfee.PropertyFeeException;
-import run.halo.propertyfee.PropertyHelper;
-import run.halo.propertyfee.SystemConfig;
-import run.halo.propertyfee.TencentSmsProvider;
-import run.halo.propertyfee.WechatPayService;
+import cn.wenbita.propertyfee.FeeQueryRequest;
+import cn.wenbita.propertyfee.FeeRecord;
+import cn.wenbita.propertyfee.FeeStandard;
+import cn.wenbita.propertyfee.OwnerAuthService;
+import cn.wenbita.propertyfee.PayOrderRequest;
+import cn.wenbita.propertyfee.PaymentConfig;
+import cn.wenbita.propertyfee.Property;
+import cn.wenbita.propertyfee.PropertyFeeException;
+import cn.wenbita.propertyfee.PropertyHelper;
+import cn.wenbita.propertyfee.SecretStore;
+import cn.wenbita.propertyfee.SystemConfig;
+import cn.wenbita.propertyfee.TencentSmsProvider;
+import cn.wenbita.propertyfee.WechatPayService;
 
 /**
  * 前台 API：查费、创建支付订单、支付结果查询、支付回调。
@@ -58,6 +59,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     private final WechatPayService wechatPayService;
     private final OwnerAuthService ownerAuthService;
     private final TencentSmsProvider tencentSmsProvider;
+    private final SecretStore secretStore;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -138,6 +140,14 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 .operationId("WxCallback").description("WeChat OAuth callback (nginx proxy_method POST): openid -> owner token or first-bind hint.")
                 .tag(tag)
                 .response(responseBuilder().implementation(Map.class)))
+            // 微信登录：一次性票据换取登录结果（令牌不经 URL 传递）
+            .POST("wx/exchange", this::wxExchange, builder -> builder
+                .operationId("WxExchange").description("Exchange one-time ticket for owner token.")
+                .tag(tag)
+                .requestBody(requestBodyBuilder().required(true)
+                    .content(contentBuilder().mediaType(MediaType.APPLICATION_JSON_VALUE)
+                        .schema(schemaBuilder().implementation(Map.class))))
+                .response(responseBuilder().implementation(Map.class)))
             // 首次微信使用：绑定业主手机号
             .POST("wx/bind", this::wxBind, builder -> builder
                 .operationId("WxBind").description("Bind wechat openid to owner phone (phone + sms code).")
@@ -183,14 +193,29 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 查费 ============
 
     private Mono<ServerResponse> feeQuery(ServerRequest request) {
+        // 匿名可查费额；但业主个人资料必须持有有效业主令牌且为该房屋登记业主才返回
+        final String verifiedPhone = tryResolveOwnerPhone(request);
         return request.bodyToMono(FeeQueryRequest.class)
             .switchIfEmpty(Mono.error(new PropertyFeeException("请求体不能为空")))
-            .flatMap(this::calculateFee)
+            .flatMap(req -> calculateFee(req, verifiedPhone))
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 
-    private Mono<Map<String, Object>> calculateFee(FeeQueryRequest req) {
+    /** 尝试解析业主令牌；未携带或无效时返回 null（按匿名处理，不报错）。 */
+    private String tryResolveOwnerPhone(ServerRequest request) {
+        String token = request.headers().firstHeader("X-Owner-Token");
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        try {
+            return ownerAuthService.verifyToken(token);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Mono<Map<String, Object>> calculateFee(FeeQueryRequest req, String verifiedPhone) {
         if (req.community() == null || req.community().isBlank()) {
             return Mono.error(new PropertyFeeException("请选择小区"));
         }
@@ -208,7 +233,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     .flatMap(calc -> wechatPayService.listChannels(req.community())
                         .map(channels -> {
                             Map<String, Object> result = new java.util.HashMap<>();
-                            result.put("property", toPropertyMap(property));
+                            result.put("property", toPropertyMap(property, verifiedPhone));
                             result.put("year", year);
                             result.put("area", calc.area);
                             result.put("unitPrice", calc.unitPrice);
@@ -473,11 +498,11 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                                 spec.setPayerPhone(payerPhone);
                                 rec.setSpec(spec);
 
-                                // 线下渠道：直接标记 PAID + 备注（管理员确认收款后）
+                                // 线下渠道：订单进入「待核实到账」，不得自动记为已缴
+                                // 必须由具备收款权限的管理员在后台确认到账后才转为 PAID
                                 if ("offline".equals(payType)) {
-                                    spec.setStatus("PAID");
-                                    spec.setPaidAt(Instant.now());
-                                    spec.setTransactionId("OFFLINE-" + outTradeNo);
+                                    spec.setStatus("PENDING_CONFIRM");
+                                    spec.setPaidAt(null);
                                     if (req.remark() != null && !req.remark().isBlank()) {
                                         spec.setRemark(req.remark());
                                     }
@@ -486,8 +511,8 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                                             "outTradeNo", outTradeNo,
                                             "totalAmount", round2(calc.totalAmount),
                                             "payType", "offline",
-                                            "status", "PAID",
-                                            "message", "线下收款已登记，缴费完成"));
+                                            "status", "PENDING_CONFIRM",
+                                            "message", "线下缴费申请已提交，待物业核实到账后确认入账"));
                                 }
                                 return client.create(rec).then(createWxOrder(pc, calc, outTradeNo, totalFen, req, siteBase));
                             });
@@ -558,89 +583,127 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 支付回调 ============
 
     private Mono<ServerResponse> payNotify(ServerRequest request) {
-        return request.bodyToMono(Map.class)
-            .flatMap(body -> {
-                Object resourceObj = body.get("resource");
-                if (resourceObj == null) {
-                    return Mono.error(new PropertyFeeException("Missing resource"));
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> resource = (Map<String, Object>) resourceObj;
-                String ciphertext = String.valueOf(resource.get("ciphertext"));
-                String nonce = String.valueOf(resource.get("nonce"));
-                String associatedData = String.valueOf(
-                    resource.getOrDefault("associated_data", ""));
-                return processNotify(ciphertext, nonce, associatedData);
-            })
+        // 回调必须先验签（微信支付平台证书）再解密入账；验签/核对失败一律返回 FAIL 让微信重试
+        final String timestamp = request.headers().firstHeader("Wechatpay-Timestamp");
+        final String nonce = request.headers().firstHeader("Wechatpay-Nonce");
+        final String signature = request.headers().firstHeader("Wechatpay-Signature");
+        final String serial = request.headers().firstHeader("Wechatpay-Serial");
+        return readRawBody(request)
+            .flatMap(body -> wechatPayService.listAllConfigs()
+                .flatMap(configs -> wechatPayService.verifyNotifySignature(
+                    configs, timestamp, nonce, signature, serial, body))
+                .flatMap(pc -> processNotify(pc, body)))
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(e -> ServerResponse.ok().bodyValue(Map.of("code", "FAIL",
                 "message", e.getMessage() == null ? "error" : e.getMessage())));
     }
 
-    private Mono<Map<String, Object>> processNotify(String ciphertext, String nonce,
-        String associatedData) {
-        // 先从 PENDING 订单找到对应小区（用 out_trade_no 无法直接拿商户配置）
-        // 策略：解密需要 apiV3Key，先查全部 PaymentConfig 逐个尝试，或用订单反查
-        return client.listAll(FeeRecord.class, ListOptions.builder().build(),
-                org.springframework.data.domain.Sort.unsorted())
-            .filter(r -> r.getSpec() != null && "PENDING".equals(r.getSpec().getStatus()))
-            .collectList()
-            .flatMap(pendingList -> {
-                if (pendingList.isEmpty()) {
-                    return Mono.just(Map.of("code", "SUCCESS", "message", "OK"));
-                }
-                return wechatPayService.listAllConfigs()
-                    .flatMap(configs -> decryptAndProcess(configs, ciphertext, nonce,
-                        associatedData));
-            });
+    /** 原样读取请求体（验签必须使用未经改动的原始报文）。 */
+    private static Mono<String> readRawBody(ServerRequest request) {
+        return org.springframework.core.io.buffer.DataBufferUtils
+            .join(request.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class))
+            .map(buf -> {
+                byte[] bytes = new byte[buf.readableByteCount()];
+                buf.read(bytes);
+                org.springframework.core.io.buffer.DataBufferUtils.release(buf);
+                return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            })
+            .defaultIfEmpty("");
     }
 
-    private Mono<Map<String, Object>> decryptAndProcess(List<PaymentConfig> configs,
-        String ciphertext, String nonce, String associatedData) {
-        // 逐个商户配置尝试解密（小区少时可行；后续可优化为按 out_trade_no 前缀定位）
-        return Mono.defer(() -> {
-            for (PaymentConfig pc : configs) {
-                String apiV3Key = pc.getSpec() == null ? null : pc.getSpec().getApiV3Key();
-                if (apiV3Key == null || apiV3Key.isBlank()) {
-                    continue;
-                }
-                try {
-                    String decrypted = WechatPayService.decryptNotifyResource(
-                        apiV3Key, ciphertext, nonce, associatedData);
-                    Map<String, Object> wx = MAPPER.readValue(decrypted, Map.class);
-                    return handleDecrypted(pc, wx);
-                } catch (Exception ignored) {
-                    // 密钥不匹配继续尝试下一个
-                }
+    /** 解密回调报文（已确认商户配置）。 */
+    private Mono<Map<String, Object>> processNotify(PaymentConfig pc, String body) {
+        return Mono.fromCallable(() -> {
+            Map<String, Object> payload = MAPPER.readValue(body, Map.class);
+            Object resourceObj = payload.get("resource");
+            if (!(resourceObj instanceof Map<?, ?> resource)) {
+                throw new PropertyFeeException("回调报文缺少 resource");
             }
-            return Mono.error(new PropertyFeeException("回调解密失败，无法匹配商户配置"));
-        });
+            String apiV3Key = wechatPayService.apiV3KeyOf(pc);
+            String plain = WechatPayService.decryptNotifyResource(apiV3Key,
+                strOf(resource.get("ciphertext")),
+                strOf(resource.get("nonce")),
+                strOf(resource.get("associated_data")));
+            return MAPPER.readValue(plain, Map.class);
+        }).flatMap(wx -> handleDecrypted(pc, wx));
     }
 
+    /**
+     * 入账处理：商户号核对 → 金额核对 → 幂等判定 → 状态流转。
+     * 任何一项对不上都不入账，返回错误交由微信重试并由人工核查。
+     */
+    @SuppressWarnings("unchecked")
     private Mono<Map<String, Object>> handleDecrypted(PaymentConfig pc, Map<String, Object> wx) {
-        String outTradeNo = String.valueOf(wx.get("out_trade_no"));
-        String tradeState = String.valueOf(wx.get("trade_state"));
-        String transactionId = String.valueOf(wx.get("transaction_id"));
+        String outTradeNo = strOf(wx.get("out_trade_no"));
+        String tradeState = strOf(wx.get("trade_state"));
+        String transactionId = strOf(wx.get("transaction_id"));
+        String mchId = strOf(wx.get("mchid"));
+        if (outTradeNo == null || outTradeNo.isBlank()) {
+            return Mono.error(new PropertyFeeException("回调缺少 out_trade_no"));
+        }
+        // 1) 商户号核对：回调商户必须与配置一致，避免跨商户伪造
+        if (mchId != null && !mchId.isBlank()
+            && !mchId.equals(pc.getSpec().getMchId())) {
+            return Mono.error(new PropertyFeeException("回调商户号与配置不一致，拒绝入账"));
+        }
+        // 非成功态：回调仅作通知，不改单（返回 SUCCESS 让微信停止重试）
         if (!"SUCCESS".equals(tradeState)) {
             return Mono.just(Map.of("code", "SUCCESS", "message", "OK"));
         }
         return client.fetch(FeeRecord.class, outTradeNo)
-            .switchIfEmpty(Mono.error(new PropertyFeeException("订单不存在")))
+            .switchIfEmpty(Mono.error(new PropertyFeeException("订单不存在：" + outTradeNo)))
             .flatMap(rec -> {
                 var spec = rec.getSpec();
                 if (spec == null) {
                     return Mono.error(new PropertyFeeException("订单数据不完整"));
                 }
+                // 2) 金额核对：回调金额（分）必须与订单应付金额完全一致
+                Long paidFen = extractFen(wx.get("amount"));
+                Long expectFen = spec.getTotalAmount() == null ? null
+                    : Math.round(spec.getTotalAmount() * 100);
+                if (paidFen == null || expectFen == null || !paidFen.equals(expectFen)) {
+                    return Mono.error(new PropertyFeeException(
+                        "回调金额与订单不一致（应付 " + expectFen + " 分，实收 " + paidFen + " 分），拒绝入账"));
+                }
+                // 3) 幂等：已入账且交易号一致视为重复通知
                 if ("PAID".equals(spec.getStatus())) {
-                    return Mono.just(Map.of("code", "SUCCESS", "message", "OK"));
+                    if (transactionId != null && transactionId.equals(spec.getTransactionId())) {
+                        return Mono.just(Map.of("code", "SUCCESS", "message", "OK"));
+                    }
+                    return Mono.error(new PropertyFeeException("订单已入账但交易号不一致，需人工核查"));
+                }
+                if (!"PENDING".equals(spec.getStatus())) {
+                    return Mono.error(new PropertyFeeException(
+                        "订单当前状态为 " + spec.getStatus() + "，不接受支付回调"));
                 }
                 spec.setStatus("PAID");
                 spec.setTransactionId(transactionId);
                 spec.setPaidAt(Instant.now());
                 spec.setMchId(pc.getSpec().getMchId());
+                spec.setPaidAmount(expectFen / 100.0);
                 return client.update(rec)
                     .thenReturn(Map.of("code", "SUCCESS", "message", "OK"));
             });
+    }
+
+    private static String strOf(Object v) {
+        return v == null ? null : String.valueOf(v);
+    }
+
+    /** 从回调的 amount 对象里取分金额。 */
+    private static Long extractFen(Object amountObj) {
+        if (!(amountObj instanceof Map<?, ?> amount)) {
+            return null;
+        }
+        Object total = amount.get("total");
+        if (total == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(total));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ============ 下拉选项数据 ============
@@ -696,27 +759,26 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     return loadSystemConfig().flatMap(cfg -> {
                         // 平台已配置腾讯云短信（复用 LMS lib/sms.ts 同一套凭据/签名/模板）→ 真实发码
                         boolean smsOn = Boolean.TRUE.equals(cfg.getSmsEnabled())
-                            && hasText(cfg.getSmsSecretId()) && hasText(cfg.getSmsSdkAppId())
+                            && hasText(cfg.getSmsSecretId()) && hasText(cfg.getSmsSecretKey())
+                            && hasText(cfg.getSmsSdkAppId())
                             && hasText(cfg.getSmsSignName()) && hasText(cfg.getSmsTemplateId());
-                        if (smsOn) {
-                            String code = ownerAuthService.issueCode(norm);
-                            if (code == null) {
-                                return Mono.error(new PropertyFeeException("发送失败，请稍后再试"));
-                            }
-                            String err = tencentSmsProvider.sendCode(
-                                cfg.getSmsSecretId(), cfg.getSmsSecretKey(),
-                                cfg.getSmsSdkAppId(), cfg.getSmsSignName(),
-                                cfg.getSmsTemplateId(), norm, code);
-                            if (err != null) {
-                                return Mono.error(new PropertyFeeException(err));
-                            }
-                            return ServerResponse.ok().bodyValue(Map.of(
-                                "success", true, "message", "验证码已发送，请查收短信"));
+                        if (!smsOn) {
+                            // 安全要求：短信通道未配置时不允许任何形式的登录绕过
+                            // （历史版本的「万能码 123456」开发通道已彻底移除）
+                            return Mono.error(new PropertyFeeException(
+                                "短信服务未配置，暂时无法发送验证码，请联系物业服务中心"));
                         }
-                        // 未配置真实短信 → 开发通道万能码
-                        boolean sent = ownerAuthService.sendCode(norm);
+                        String code = ownerAuthService.issueCode(norm);
+                        String err = tencentSmsProvider.sendCode(
+                            cfg.getSmsSecretId(), secretStore.decrypt(cfg.getSmsSecretKey()),
+                            cfg.getSmsSdkAppId(), cfg.getSmsSignName(),
+                            cfg.getSmsTemplateId(), norm, code);
+                        if (err != null) {
+                            ownerAuthService.invalidateCode(norm);
+                            return Mono.error(new PropertyFeeException(err));
+                        }
                         return ServerResponse.ok().bodyValue(Map.of(
-                            "success", sent, "message", "验证码已发送（测试通道：万能码 123456）"));
+                            "success", true, "message", "验证码已发送，请查收短信"));
                     });
                 });
             })
@@ -844,20 +906,31 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             .collectList();
     }
 
-    private Map<String, Object> toPropertyMap(Property p) {
+    /**
+     * 房屋信息视图。业主姓名 / 手机号属于个人资料：
+     * 仅当调用方持有有效业主令牌、且该手机号确为这套房屋的登记业主时才返回；
+     * 匿名调用只返回房屋本身与费用相关信息（ownerVerified=false）。
+     */
+    private Map<String, Object> toPropertyMap(Property p, String verifiedPhone) {
         var s = p.getSpec();
         Map<String, Object> m = new java.util.HashMap<>();
-        if (s != null) {
-            m.put("community", s.getCommunity());
-            m.put("building", s.getBuilding());
-            m.put("unit", s.getUnit());
-            m.put("room", s.getRoom());
-            m.put("area", s.getArea());
-            m.put("propertyType", s.getPropertyType());
+        if (s == null) {
+            return m;
+        }
+        m.put("community", s.getCommunity());
+        m.put("building", s.getBuilding());
+        m.put("unit", s.getUnit());
+        m.put("room", s.getRoom());
+        m.put("area", s.getArea());
+        m.put("propertyType", s.getPropertyType());
+        m.put("houseStatus", s.getHouseStatus());
+        boolean isOwner = verifiedPhone != null
+            && PropertyHelper.isOwnerPhone(p, PropertyHelper.normalizePhone(verifiedPhone));
+        m.put("ownerVerified", isOwner);
+        if (isOwner) {
             m.put("ownerName", s.getOwnerName());
             m.put("ownerPhone", s.getOwnerPhone());
             m.put("ownerType", s.getOwnerType());
-            m.put("houseStatus", s.getHouseStatus());
         }
         return m;
     }
@@ -900,24 +973,43 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             .defaultIfEmpty(new SystemConfig.SystemConfigSpec());
     }
 
+    // ===== 微信一键登录（安全加固：state 防重放 + 回跳白名单 + 一次性票据） =====
+
+    /** OAuth state 暂存：单次使用、短时有效，防 CSRF / 重放。 */
+    private record WxState(String redirectTarget, long expireAt) {
+    }
+
+    /** 登录票据暂存：登录结果不在 URL 中传递，改为一次性票据后台换取。 */
+    private record WxTicket(String token, String phone, String openid, boolean needBind,
+        long expireAt) {
+    }
+
+    private final Map<String, WxState> wxStates = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, WxTicket> wxTickets = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final long WX_STATE_TTL_SECONDS = 300;
+    private static final long WX_TICKET_TTL_SECONDS = 120;
+
     /** 构造微信网页授权 URL（snsapi_base 静默拿 openid）；前端拿 url 后 location 跳转。 */
     private Mono<ServerResponse> wxAuthorize(ServerRequest request) {
         return loadSystemConfig().flatMap(cfg -> {
             if (!Boolean.TRUE.equals(cfg.getWxEnabled()) || !hasText(cfg.getWxAppId())) {
                 return badRequest("微信登录未启用，请先在后台系统配置中启用（复用平台服务号）");
             }
-            String redirectTarget = request.queryParam("redirect")
-                .filter(s -> hasText(s))
-                .orElseGet(() -> hasText(cfg.getFrontUrl())
-                    ? cfg.getFrontUrl()
-                    : resolveSiteBase(request)
-                        + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee");
+            String fallback = hasText(cfg.getFrontUrl()) ? cfg.getFrontUrl()
+                : resolveSiteBase(request)
+                    + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee";
+            String requested = request.queryParam("redirect")
+                .filter(s -> hasText(s)).orElse(null);
+            // 回跳地址白名单：只允许本站/已配置站点，其余一律回退默认前台页（防开放重定向）
+            String redirectTarget = requested != null && isAllowedRedirect(requested, request, cfg)
+                ? requested : fallback;
             String base = hasText(cfg.getWxRedirectBase())
                 ? cfg.getWxRedirectBase() : resolveSiteBase(request);
-            // 回调经公众号后台已配的网页授权域名 → nginx /pf-wx/ 反代回本插件
             String callback = base + "/pf-wx/callback";
-            String state = java.util.Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(redirectTarget.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String state = SecretStore.randomHex(16);
+            wxStates.put(state, new WxState(redirectTarget,
+                java.time.Instant.now().getEpochSecond() + WX_STATE_TTL_SECONDS));
             String url = "https://open.weixin.qq.com/connect/oauth2/authorize"
                 + "?appid=" + cfg.getWxAppId()
                 + "&redirect_uri=" + urlEncode(callback)
@@ -929,24 +1021,67 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         }).onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 
-    /** 微信授权回调：code 换 openid → 命中已绑定业主发 Token；未命中提示先绑定手机号。 */
+    /**
+     * 回跳地址白名单校验：仅允许与本站点（或已配置前台地址 / 授权回调域名）同 host 的绝对地址。
+     */
+    private boolean isAllowedRedirect(String target, ServerRequest request,
+        SystemConfig.SystemConfigSpec cfg) {
+        try {
+            java.net.URI u = java.net.URI.create(target);
+            String scheme = u.getScheme();
+            if (scheme == null || !("http".equals(scheme) || "https".equals(scheme))) {
+                return false;
+            }
+            String host = u.getHost();
+            if (host == null || host.isBlank()) {
+                return false;
+            }
+            java.util.Set<String> allowed = new java.util.HashSet<>();
+            addHost(allowed, resolveSiteBase(request));
+            addHost(allowed, cfg.getFrontUrl());
+            addHost(allowed, cfg.getWxRedirectBase());
+            return allowed.contains(host.toLowerCase(java.util.Locale.ROOT));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void addHost(java.util.Set<String> set, String url) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        try {
+            String h = java.net.URI.create(url).getHost();
+            if (h != null && !h.isBlank()) {
+                set.add(h.toLowerCase(java.util.Locale.ROOT));
+            }
+        } catch (Exception ignored) {
+            // 忽略非法 URL
+        }
+    }
+
+    /** 微信授权回调：校验 state → code 换 openid → 发一次性票据回跳（令牌不进 URL）。 */
     private Mono<ServerResponse> wxCallback(ServerRequest request) {
         String code = request.queryParam("code").orElse("");
+        String stateRaw = request.queryParam("state").orElse("");
         String defaultFront = resolveSiteBase(request)
             + "/apis/api.propertyfee.halo.run/v1alpha1/pages/property-fee";
-        String decoded = decodeRedirect(request.queryParam("state").orElse(""));
-        final String redirectTarget = hasText(decoded) ? decoded : defaultFront;
+        // state 必须由本插件签发且未过期（一次性，用过即删）
+        WxState st = hasText(stateRaw) ? wxStates.remove(stateRaw) : null;
+        if (st == null || java.time.Instant.now().getEpochSecond() > st.expireAt()) {
+            return redirectTo(withParam(defaultFront, "wx=cb&err=bad_state"));
+        }
+        final String redirectTarget = hasText(st.redirectTarget()) ? st.redirectTarget() : defaultFront;
         if (code.isBlank()) {
-            return redirectTo(redirectTarget + (redirectTarget.contains("?") ? "&" : "?")
-                + "wx=cb&err=denied");
+            return redirectTo(withParam(redirectTarget, "wx=cb&err=denied"));
         }
         return loadSystemConfig().flatMap(cfg -> {
-            if (!hasText(cfg.getWxAppId()) || !hasText(cfg.getWxAppSecret())) {
-                return redirectTo(redirectTarget + (redirectTarget.contains("?") ? "&" : "?")
-                    + "wx=cb&err=not_configured");
+            String appSecret = secretStore.decrypt(cfg.getWxAppSecret());
+            if (!hasText(cfg.getWxAppId()) || !hasText(appSecret)) {
+                return redirectTo(withParam(redirectTarget, "wx=cb&err=not_configured"));
             }
             String api = "https://api.weixin.qq.com/sns/oauth2/access_token?appid="
-                + cfg.getWxAppId() + "&secret=" + cfg.getWxAppSecret()
+                + cfg.getWxAppId() + "&secret=" + appSecret
                 + "&code=" + code + "&grant_type=authorization_code";
             return Mono.fromCallable(() -> {
                     try {
@@ -969,33 +1104,101 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     }
                     final String openid = openidTmp;
                     if (openid == null || openid.isBlank()) {
-                        return redirectTo(redirectTarget
-                            + (redirectTarget.contains("?") ? "&" : "?")
-                            + "wx=cb&err=oauth_failed");
+                        return redirectTo(withParam(redirectTarget, "wx=cb&err=oauth_failed"));
                     }
-                    // 命中已绑定业主 → 直接发业主 Token
-                    return listAll(Property.class).flatMap(all -> {
+                    return listAll(Property.class).map(all -> {
+                        long exp = java.time.Instant.now().getEpochSecond() + WX_TICKET_TTL_SECONDS;
                         for (Property p : all) {
                             String phone = PropertyHelper.findOwnerPhoneByWxOpenid(
                                 p.getSpec(), openid);
                             if (phone != null) {
                                 String token = ownerAuthService.issueTokenByPhone(phone);
-                                return redirectTo(redirectTarget
-                                    + (redirectTarget.contains("?") ? "&" : "?")
-                                    + "wx=cb&ok=1&token=" + token + "&phone=" + phone);
+                                String ticket = SecretStore.randomHex(24);
+                                wxTickets.put(ticket, new WxTicket(token, phone, null, false, exp));
+                                return withParam(redirectTarget, "wx=cb&ticket=" + ticket);
                             }
                         }
-                        return redirectTo(redirectTarget
-                            + (redirectTarget.contains("?") ? "&" : "?")
-                            + "wx=cb&first=1&wxopenid=" + openid);
-                    });
+                        String ticket = SecretStore.randomHex(24);
+                        wxTickets.put(ticket, new WxTicket(null, null, openid, true, exp));
+                        return withParam(redirectTarget, "wx=cb&ticket=" + ticket + "&first=1");
+                    }).flatMap(this::redirectTo);
                 });
         });
     }
 
     /**
+     * 用一次性票据换取登录结果。令牌与手机号只在响应体里出现，
+     * 不再拼进回跳 URL（避免浏览器历史 / 日志 / Referer 泄漏）。
+     */
+    private Mono<ServerResponse> wxExchange(ServerRequest request) {
+        return parseBody(request, Map.class)
+            .flatMap(m -> {
+                String ticket = m.get("ticket") == null ? null : String.valueOf(m.get("ticket"));
+                if (!hasText(ticket)) {
+                    return Mono.error(new PropertyFeeException("登录票据不能为空"));
+                }
+                WxTicket t = wxTickets.remove(ticket);
+                if (t == null || java.time.Instant.now().getEpochSecond() > t.expireAt()) {
+                    return Mono.error(new PropertyFeeException("登录票据已失效，请重新进入"));
+                }
+                if (t.needBind()) {
+                    Map<String, Object> need = new java.util.HashMap<>();
+                    need.put("success", true);
+                    need.put("needBind", true);
+                    need.put("openid", t.openid() == null ? "" : t.openid());
+                    return Mono.just(need);
+                }
+                final String phone = t.phone();
+                return listAll(Property.class).map(all -> {
+                    List<Map<String, Object>> houses = new ArrayList<>();
+                    String name = "";
+                    for (Property p : all) {
+                        if (!PropertyHelper.isOwnerPhone(p, phone)) {
+                            continue;
+                        }
+                        var s = p.getSpec();
+                        Map<String, Object> h = new java.util.HashMap<>();
+                        if (s != null) {
+                            h.put("community", s.getCommunity());
+                            h.put("building", s.getBuilding());
+                            h.put("room", s.getRoom());
+                            h.put("propertyType", s.getPropertyType());
+                            h.put("area", s.getArea());
+                        }
+                        houses.add(h);
+                        if (!hasText(name)) {
+                            Property.Owner o = PropertyHelper.effectiveOwners(p.getSpec()).stream()
+                                .filter(x -> phone.equals(
+                                    PropertyHelper.normalizePhone(x.getPhone())))
+                                .findFirst().orElse(null);
+                            if (o != null) {
+                                name = o.getName() == null ? "" : o.getName();
+                            }
+                        }
+                    }
+                    Map<String, Object> ok = new java.util.HashMap<>();
+                    ok.put("success", true);
+                    ok.put("needBind", false);
+                    ok.put("token", t.token());
+                    ok.put("phone", phone);
+                    ok.put("name", name);
+                    ok.put("houses", houses);
+                    ok.put("houseCount", houses.size());
+                    return ok;
+                });
+            })
+            .flatMap(v -> ServerResponse.ok().bodyValue(v))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 在 URL 上追加查询串。 */
+    private static String withParam(String url, String query) {
+        return url + (url.contains("?") ? "&" : "?") + query;
+    }
+
+    /**
      * 首次微信使用绑定：微信 openid + 业主手机号 + 短信验证码。
-     * 校验短信码成功后把 openid 写入该业主名下（所有含该手机号的房屋同步绑定），返回业主 Token。
+     * 校验短信码成功后把 openid 写入该业主名下（所有含该手机号的房屋同步绑定），返回业主令牌。
      */
     private Mono<ServerResponse> wxBind(ServerRequest request) {
         return parseBody(request, Map.class)
@@ -1044,11 +1247,15 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                                     .stream().filter(x -> phone.equals(
                                         PropertyHelper.normalizePhone(x.getPhone())))
                                     .findFirst().orElse(null);
-                                return o == null ? "" : o.getName();
+                                return o == null || o.getName() == null ? "" : o.getName();
                             }).filter(s -> hasText(s)).findFirst().orElse("");
-                        return ServerResponse.ok().bodyValue(Map.of(
-                            "success", true, "message", "绑定成功，欢迎回来",
-                            "token", token, "phone", phone, "name", name));
+                        Map<String, Object> ok = new java.util.HashMap<>();
+                        ok.put("success", true);
+                        ok.put("message", "绑定成功，欢迎回来");
+                        ok.put("token", token);
+                        ok.put("phone", phone);
+                        ok.put("name", name);
+                        return ServerResponse.ok().bodyValue(ok);
                     });
                 });
             })
@@ -1059,15 +1266,6 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         return Mono.just(ServerResponse.temporaryRedirect(
             java.net.URI.create(location)).build())
             .flatMap(sr -> sr);
-    }
-
-    private static String decodeRedirect(String stateRaw) {
-        try {
-            return new String(java.util.Base64.getUrlDecoder().decode(stateRaw),
-                java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private static String urlEncode(String s) {

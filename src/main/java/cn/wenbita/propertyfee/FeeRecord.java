@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
@@ -58,7 +58,7 @@ public class FeeRecord extends AbstractExtension {
         /** 实缴金额（元，即微信支付金额，单位元）。 */
         private Double paidAmount;
 
-        /** 支付状态：PENDING / PAID / FAILED / CLOSED。 */
+        /** 支付状态：PENDING（待支付）/ PENDING_CONFIRM（线下待核实到账）/ PAID（已入账）/ FAILED / CLOSED。 */
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
         private String status;
 
@@ -72,7 +72,7 @@ public class FeeRecord extends AbstractExtension {
         /** 微信支付交易号（transaction_id）。 */
         private String transactionId;
 
-        /** 支付方式：native（扫码）/ jsapi（微信内）/ alipay（支付宝）/ offline（线下）。 */
+        /** 支付方式：native（扫码）/ jsapi（微信内）/ offline（线下）。 */
         private String payType;
 
         /** 缴费时间（微信回调成功时间）。 */
@@ -92,5 +92,11 @@ public class FeeRecord extends AbstractExtension {
 
         /** 备注（线下收款登记/支付渠道名等）。 */
         private String remark;
+
+        /** 线下到账确认人（Halo 管理员账号，审计用）。 */
+        private String confirmedBy;
+
+        /** 线下到账确认时间。 */
+        private Instant confirmedAt;
     }
 }

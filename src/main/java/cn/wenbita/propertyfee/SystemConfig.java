@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -57,8 +57,11 @@ public class SystemConfig extends AbstractExtension {
         /** 服务号 AppSecret（与 LMS 微信登录同一 Secret，仅存插件配置，不入代码库）。 */
         private String wxAppSecret;
 
-        /** 微信回调域名基础（必须是公众号后台已配网页授权域名，如 https://aiedu.yn.cn）。 */
-        private String wxRedirectBase = "https://aiedu.yn.cn";
+        /**
+         * 微信回调域名基础（必须是本公众号后台「网页授权域名」已备案的域名）。
+         * 为空表示未配置，微信登录功能不可用——不提供任何默认站点，避免把开发者站点带到用户环境。
+         */
+        private String wxRedirectBase;
 
         /** 前台缴费页完整 URL（可配置；为空时自动推导当前站点 + /apis/api.propertyfee.halo.run/v1alpha1/property-fee-page）。 */
         private String frontUrl;

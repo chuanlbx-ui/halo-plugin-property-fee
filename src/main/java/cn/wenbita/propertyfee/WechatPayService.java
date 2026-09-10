@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
@@ -27,6 +27,19 @@ public class WechatPayService {
     private static final String API_BASE = "https://api.mch.weixin.qq.com";
 
     private final run.halo.app.extension.ReactiveExtensionClient client;
+
+    /** 服务端密钥库：商户私钥 / APIv3 密钥均以密文落库，使用时才解密。 */
+    private final SecretStore secretStore;
+
+    /** 读取商户私钥明文（落库为密文）。 */
+    private String privateKeyOf(PaymentConfig pc) {
+        return secretStore.decrypt(pc.getSpec() == null ? null : pc.getSpec().getMchPrivateKey());
+    }
+
+    /** 读取 APIv3 密钥明文（落库为密文）。 */
+    public String apiV3KeyOf(PaymentConfig pc) {
+        return secretStore.decrypt(pc.getSpec() == null ? null : pc.getSpec().getApiV3Key());
+    }
 
     /**
      * 获取小区的支付配置。
@@ -270,8 +283,7 @@ public class WechatPayService {
 
     private String buildAuthHeader(PaymentConfig pc, String method, String urlPath,
         String body, String nonceStr, long timestamp) throws Exception {
-        String signature = sign(method, urlPath, body, nonceStr, timestamp,
-            pc.getSpec().getMchPrivateKey());
+        String signature = sign(method, urlPath, body, nonceStr, timestamp, privateKeyOf(pc));
         return "WECHATPAY2-SHA256-RSA2048 mchid=\"" + pc.getSpec().getMchId()
             + "\",nonce_str=\"" + nonceStr + "\",signature=\"" + signature
             + "\",timestamp=\"" + timestamp + "\",serial_no=\""
@@ -367,19 +379,171 @@ public class WechatPayService {
 
     /**
      * 解密微信回调 resource（AEAD_AES_256_GCM）。
+     *
+     * <p>规范要点（历史实现曾踩坑）：APIv3 报文里的 {@code nonce} 是 12 个字符的
+     * <b>ASCII 字符串</b>，直接作为 GCM 的 IV 使用，<b>不能做 base64 解码</b>；
+     * {@code ciphertext} 整体 base64 解码后「密文 + 16 字节 auth tag」，
+     * Java 侧直接传入完整数据即可；{@code associated_data} 原样 UTF-8。
      */
     public static String decryptNotifyResource(String apiV3Key, String ciphertext,
         String nonce, String associatedData) throws Exception {
+        if (apiV3Key == null || apiV3Key.getBytes(StandardCharsets.UTF_8).length != 32) {
+            throw new PropertyFeeException("APIv3 密钥必须为 32 字节");
+        }
         byte[] full = Base64.getDecoder().decode(ciphertext);
-        // 注意：微信回调密文是「密文+16字节tag」整体，Java GCM 解密需传入完整数据（含tag）
         javax.crypto.spec.SecretKeySpec keySpec =
             new javax.crypto.spec.SecretKeySpec(apiV3Key.getBytes(StandardCharsets.UTF_8), "AES");
         javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
         javax.crypto.spec.GCMParameterSpec gcmSpec =
-            new javax.crypto.spec.GCMParameterSpec(128, Base64.getDecoder().decode(nonce));
+            new javax.crypto.spec.GCMParameterSpec(128, ivOf(nonce));
         cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, gcmSpec);
-        cipher.updateAAD(associatedData.getBytes(StandardCharsets.UTF_8));
+        cipher.updateAAD((associatedData == null ? "" : associatedData).getBytes(StandardCharsets.UTF_8));
         return new String(cipher.doFinal(full), StandardCharsets.UTF_8);
+    }
+
+    /** GCM IV：nonce 原文（12 字符 ASCII）优先；个别场景兼容 base64(12B)。 */
+    private static byte[] ivOf(String nonce) {
+        if (nonce == null || nonce.isBlank()) {
+            throw new PropertyFeeException("回调 nonce 缺失");
+        }
+        byte[] raw = nonce.getBytes(StandardCharsets.UTF_8);
+        if (raw.length == 12) {
+            return raw;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(nonce);
+            if (decoded.length == 12) {
+                return decoded;
+            }
+        } catch (Exception ignored) {
+            // 落到下方统一报错
+        }
+        throw new PropertyFeeException("回调 nonce 长度非法：" + raw.length);
+    }
+
+    // ============ 支付回调验签（微信支付平台证书） ============
+
+    /** 平台证书缓存：mchId -> serialNo(大写) -> 证书。 */
+    private final java.util.Map<String, java.util.Map<String, java.security.cert.X509Certificate>>
+        platformCertCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 校验微信支付回调签名（Wechatpay-Signature / -Timestamp / -Nonce / -Serial），
+     * 并返回验签通过的商户配置；找不到可验签商户时抛异常（调用方应返回失败让微信重试）。
+     *
+     * <p>验签串规范：{@code timestamp + "\n" + nonce + "\n" + body + "\n"}，
+     * 用对应平台证书公钥做 SHA256withRSA 校验；同时限制时间戳在 ±300 秒内防重放。
+     */
+    public Mono<PaymentConfig> verifyNotifySignature(List<PaymentConfig> configs, String timestamp,
+        String nonce, String signature, String serial, String body) {
+        if (timestamp == null || nonce == null || signature == null
+            || serial == null || body == null || serial.isBlank()) {
+            return Mono.error(new PropertyFeeException("回调缺少验签头，拒绝处理"));
+        }
+        long ts;
+        try {
+            ts = Long.parseLong(timestamp.trim());
+        } catch (Exception e) {
+            return Mono.error(new PropertyFeeException("回调时间戳非法"));
+        }
+        if (Math.abs(System.currentTimeMillis() / 1000 - ts) > 300) {
+            return Mono.error(new PropertyFeeException("回调时间戳超出允许范围（防重放）"));
+        }
+        final String message = timestamp + "\n" + nonce + "\n" + body + "\n";
+        final String targetSerial = serial.trim().toUpperCase(java.util.Locale.ROOT);
+        return reactor.core.publisher.Flux.fromIterable(configs)
+            .filter(pc -> pc.getSpec() != null && pc.getSpec().getMchId() != null)
+            .concatMap(pc -> platformCert(pc, targetSerial)
+                .filter(cert -> verifySignature(cert, message, signature))
+                .map(cert -> pc))
+            .next()
+            .switchIfEmpty(Mono.error(new PropertyFeeException(
+                "回调验签失败：未匹配到可验签的商户配置")));
+    }
+
+    private static boolean verifySignature(java.security.cert.X509Certificate cert,
+        String message, String signature) {
+        try {
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            verifier.initVerify(cert.getPublicKey());
+            verifier.update(message.getBytes(StandardCharsets.UTF_8));
+            return verifier.verify(Base64.getDecoder().decode(signature));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 取平台证书：本地缓存优先，未命中则调 /v3/certificates 拉取并用 APIv3 密钥解密。 */
+    private Mono<java.security.cert.X509Certificate> platformCert(PaymentConfig pc, String serial) {
+        String mchId = pc.getSpec().getMchId();
+        var cache = platformCertCache.computeIfAbsent(mchId,
+            k -> new java.util.concurrent.ConcurrentHashMap<>());
+        var cached = cache.get(serial);
+        if (cached != null) {
+            return Mono.just(cached);
+        }
+        return doRequest(pc, "GET", "/v3/certificates", null)
+            .flatMap(resp -> {
+                try {
+                    String apiV3Key = apiV3KeyOf(pc);
+                    if (apiV3Key == null || apiV3Key.isBlank()) {
+                        return Mono.error(new PropertyFeeException("商户未配置 APIv3 密钥"));
+                    }
+                    Object dataObj = resp.get("data");
+                    if (!(dataObj instanceof List<?> data)) {
+                        return Mono.empty();
+                    }
+                    for (Object itemObj : data) {
+                        if (!(itemObj instanceof Map<?, ?> item)) {
+                            continue;
+                        }
+                        Object encObj = item.get("encrypt_certificate");
+                        if (!(encObj instanceof Map<?, ?> enc)) {
+                            continue;
+                        }
+                        String pem = decryptNotifyResource(apiV3Key,
+                            String.valueOf(enc.get("ciphertext")),
+                            String.valueOf(enc.get("nonce")),
+                            enc.get("associated_data") == null
+                                ? "" : String.valueOf(enc.get("associated_data")));
+                        var cert = parseCertificate(pem);
+                        if (cert != null) {
+                            String sn = item.get("serial_no") == null
+                                ? cert.getSerialNumber().toString(16)
+                                : String.valueOf(item.get("serial_no"));
+                            cache.put(sn.toUpperCase(java.util.Locale.ROOT), cert);
+                            cache.put(cert.getSerialNumber().toString(16)
+                                .toUpperCase(java.util.Locale.ROOT), cert);
+                        }
+                    }
+                    var found = cache.get(serial);
+                    return found == null ? Mono.empty() : Mono.just(found);
+                } catch (Exception e) {
+                    return Mono.error(new PropertyFeeException(
+                        "平台证书获取失败: " + e.getMessage()));
+                }
+            });
+    }
+
+    private static java.security.cert.X509Certificate parseCertificate(String pem) {
+        try {
+            String base64 = pem.replace("-----BEGIN CERTIFICATE-----", "")
+                .replace("-----END CERTIFICATE-----", "")
+                .replaceAll("\\s", "");
+            byte[] der = Base64.getDecoder().decode(base64);
+            var factory = java.security.cert.CertificateFactory.getInstance("X.509");
+            return (java.security.cert.X509Certificate) factory.generateCertificate(
+                new java.io.ByteArrayInputStream(der));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 主动查单补偿：回调丢失时按商户订单号查询真实支付状态。
+     */
+    public Mono<Map<String, Object>> queryOrderByOutTradeNo(PaymentConfig pc, String outTradeNo) {
+        return queryOrder(pc, outTradeNo);
     }
 
     private static String toJson(Map<String, Object> map) {

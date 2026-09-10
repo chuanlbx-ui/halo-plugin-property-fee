@@ -471,7 +471,7 @@ function renderFee(data) {
   document.getElementById('feeProperty').innerHTML = `
     <div class="p-item"><span class="k">小区</span>${p.community}</div>
     <div class="p-item"><span class="k">房号</span>${p.building} ${p.room} 室</div>
-    <div class="p-item"><span class="k">业主</span>${p.ownerName || '—'}</div>
+    <div class="p-item"><span class="k">业主</span>${p.ownerName ? p.ownerName : (p.ownerVerified ? '—' : '登录后可见')}</div>
     <div class="p-item"><span class="k">面积</span>${data.area} ㎡</div>
     ${p.propertyType ? `<div class="p-item"><span class="k">类型</span>${p.propertyType}</div>` : ''}
   `;
@@ -535,7 +535,7 @@ function renderChannels(channels) {
 }
 
 function channelTypeText(t) {
-  return { wechat_native: '扫码', wechat_jsapi: '公众号', alipay: '支付宝', offline: '线下' }[t] || t;
+  return { wechat_native: '扫码', wechat_jsapi: '公众号', offline: '线下' }[t] || t;
 }
 
 function onChannelChange() {
@@ -547,12 +547,13 @@ function onChannelChange() {
   const ch = channels.find(c => (c.channelName || c.channelType) === name);
   if (!ch) return;
   if (ch.channelType === 'offline') {
-    btn.textContent = '已线下收款登记';
+    btn.textContent = '提交线下缴费申请';
     if (ch.offlineInstruction) {
-      offlineInfo.textContent = '线下收款说明：' + ch.offlineInstruction;
+      offlineInfo.textContent = '线下缴费说明：' + ch.offlineInstruction
+        + '（提交后由物业核实到账再确认入账）';
       offlineInfo.classList.remove('hidden');
     } else {
-      offlineInfo.textContent = '线下收款：请联系物业完成缴费登记';
+      offlineInfo.textContent = '线下缴费：请联系物业完成缴费，提交申请后由物业核实到账再确认入账';
       offlineInfo.classList.remove('hidden');
     }
   } else if (ch.channelType === 'wechat_native') {
@@ -560,9 +561,6 @@ function onChannelChange() {
     offlineInfo.classList.add('hidden');
   } else if (ch.channelType === 'wechat_jsapi') {
     btn.textContent = '微信支付';
-    offlineInfo.classList.add('hidden');
-  } else if (ch.channelType === 'alipay') {
-    btn.textContent = '支付宝支付';
     offlineInfo.classList.add('hidden');
   } else {
     btn.textContent = '确认支付';
@@ -599,29 +597,45 @@ async function wxLogin() {
   } catch (e) { showMsg(msg, '微信登录失败，请用手机验证码', 'err'); }
 }
 
-/** 微信授权回跳处理：wx=cb&ok=1&token=.. 已绑定自动登录；first=1&wxopenid=.. 首次绑定提示。 */
-function handleWxCallback() {
+/**
+ * 微信授权回跳处理：wx=cb&ticket=.. → 用一次性票据到后台换取登录结果。
+ * 令牌与手机号不再出现在回跳 URL 中（避免浏览器历史 / 日志 / Referer 泄漏）。
+ */
+async function handleWxCallback() {
   const q = new URLSearchParams(location.search);
   if (q.get('wx') !== 'cb') return;
   const msg = getOwnerMsg();
-  const token = q.get('token');
-  const phone = q.get('phone');
-  const oid = q.get('wxopenid');
+  const ticket = q.get('ticket');
+  // 立刻清掉地址栏参数，票据不留在历史记录里
   history.replaceState({}, '', location.origin + location.pathname);
   if (q.get('err')) {
     showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
     return;
   }
-  if (token) {
-    setOwnerInfo({ token: token, phone: phone || '' });
-    renderOwnerLogged(getOwnerInfo());
-    showMsg(msg, '✅ 微信登录成功，可进行缴费', 'ok');
+  if (!ticket) {
+    showMsg(msg, '微信登录会话无效，请重新点击微信登录', 'err');
     return;
   }
-  if (oid) {
-    window._wxOpenid = oid;
-    document.getElementById('wxFirstHint').classList.remove('hidden');
-    showMsg(msg, '请先完成业主手机号绑定（仅首次）', 'ok');
+  try {
+    const data = await apiPost('/wx/exchange', { ticket: ticket });
+    if (data && data.needBind) {
+      window._wxOpenid = data.openid || '';
+      document.getElementById('wxFirstHint').classList.remove('hidden');
+      showMsg(msg, '请先完成业主手机号绑定（仅首次）', 'ok');
+      return;
+    }
+    if (data && data.token) {
+      setOwnerInfo({
+        token: data.token, phone: data.phone || '',
+        name: data.name || '', houses: data.houses || [],
+      });
+      renderOwnerLogged(getOwnerInfo());
+      showMsg(msg, '✅ 微信登录成功，可进行缴费', 'ok');
+      return;
+    }
+    showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
+  } catch (e) {
+    showMsg(msg, '微信登录失败，请用手机验证码', 'err');
   }
 }
 

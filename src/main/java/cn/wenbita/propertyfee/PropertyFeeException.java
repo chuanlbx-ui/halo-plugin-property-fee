@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 /**
  * 物业费业务异常。统一转 400 返回。

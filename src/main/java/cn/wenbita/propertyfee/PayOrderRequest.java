@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 /**
  * 创建支付订单请求。
@@ -14,7 +14,7 @@ public record PayOrderRequest(
     String room,
     /** 缴费年份。 */
     Integer year,
-    /** 支付方式：native / jsapi / alipay / offline。 */
+    /** 支付方式：native / jsapi / offline。 */
     String payType,
     /** 支付渠道名称（对应 PaymentConfig 的 channelName，多渠道时区分；空则用默认渠道）。 */
     String payChannel,

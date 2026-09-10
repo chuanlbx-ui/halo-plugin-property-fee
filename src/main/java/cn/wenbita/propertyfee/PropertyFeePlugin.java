@@ -1,4 +1,4 @@
-package run.halo.propertyfee;
+package cn.wenbita.propertyfee;
 
 import org.springframework.stereotype.Component;
 import run.halo.app.extension.SchemeManager;

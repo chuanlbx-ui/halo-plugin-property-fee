@@ -1,4 +1,4 @@
-package run.halo.propertyfee.console;
+package cn.wenbita.propertyfee.console;
 
 import static org.springdoc.core.fn.builders.apiresponse.Builder.responseBuilder;
 import static org.springdoc.core.fn.builders.content.Builder.contentBuilder;
@@ -28,18 +28,19 @@ import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.propertyfee.Community;
-import run.halo.propertyfee.CommunityImportRequest;
-import run.halo.propertyfee.Property;
-import run.halo.propertyfee.PropertyHelper;
-import run.halo.propertyfee.PropertyImportRequest;
-import run.halo.propertyfee.FeeRecord;
-import run.halo.propertyfee.FeeStandard;
-import run.halo.propertyfee.PaymentConfig;
-import run.halo.propertyfee.SystemConfig;
-import run.halo.propertyfee.Property;
-import run.halo.propertyfee.PropertyFeeException;
-import run.halo.propertyfee.PropertyImportRequest;
+import cn.wenbita.propertyfee.Community;
+import cn.wenbita.propertyfee.CommunityImportRequest;
+import cn.wenbita.propertyfee.Property;
+import cn.wenbita.propertyfee.PropertyHelper;
+import cn.wenbita.propertyfee.PropertyImportRequest;
+import cn.wenbita.propertyfee.FeeRecord;
+import cn.wenbita.propertyfee.FeeStandard;
+import cn.wenbita.propertyfee.PaymentConfig;
+import cn.wenbita.propertyfee.SecretStore;
+import cn.wenbita.propertyfee.SystemConfig;
+import cn.wenbita.propertyfee.Property;
+import cn.wenbita.propertyfee.PropertyFeeException;
+import cn.wenbita.propertyfee.PropertyImportRequest;
 
 /**
  * 控制台 API：基础配置（Property/FeeStandard/PaymentConfig）、Excel导入、报表统计。
@@ -51,6 +52,9 @@ import run.halo.propertyfee.PropertyImportRequest;
 public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private final ReactiveExtensionClient client;
+
+    /** 服务端密钥库：敏感配置以密文落库、接口不回传明文。 */
+    private final SecretStore secretStore;
 
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
@@ -145,6 +149,18 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
             // ===== 缴费记录 =====
             .GET("feerecords", this::listFeeRecords, builder -> builder
                 .operationId("ListFeeRecords").description("List fee records.").tag(tag))
+            // 线下缴费：管理员确认到账（待核实 → 已缴）
+            .POST("feerecords/{name}/confirm", this::confirmOfflinePayment, builder -> builder
+                .operationId("ConfirmOfflinePayment")
+                .description("Confirm offline payment received (PENDING_CONFIRM -> PAID).").tag(tag)
+                .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
+                    .implementation(String.class)))
+            // 线下缴费：管理员驳回（待核实 → 已关闭）
+            .POST("feerecords/{name}/reject", this::rejectOfflinePayment, builder -> builder
+                .operationId("RejectOfflinePayment")
+                .description("Reject an offline payment claim (PENDING_CONFIRM -> CLOSED).").tag(tag)
+                .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
+                    .implementation(String.class)))
             // ===== 报表统计 =====
             .GET("reports/summary", this::summaryReport, builder -> builder
                 .operationId("SummaryReport").description("Summary report by community/building.")
@@ -378,9 +394,65 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     private Mono<ServerResponse> listConfigs(ServerRequest request) {
         return listAll(PaymentConfig.class)
-            .map(list -> new ListResult<>(list))
+            .map(list -> {
+                List<Map<String, Object>> safe = new java.util.ArrayList<>();
+                for (PaymentConfig pc : list) {
+                    safe.add(safeConfigMap(pc));
+                }
+                return new ListResult<>(safe);
+            })
             .flatMap(r -> ServerResponse.ok().bodyValue(r))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 输出视图：商户私钥 / APIv3 密钥不回传明文，只回传「是否已配置」。 */
+    private Map<String, Object> safeConfigMap(PaymentConfig pc) {
+        Map<String, Object> out = new java.util.HashMap<>();
+        out.put("metadata", pc.getMetadata());
+        PaymentConfig.PaymentConfigSpec s = pc.getSpec();
+        Map<String, Object> spec = new java.util.HashMap<>();
+        if (s != null) {
+            spec.put("community", s.getCommunity());
+            spec.put("channelType", s.getChannelType());
+            spec.put("channelName", s.getChannelName());
+            spec.put("enabled", s.getEnabled());
+            spec.put("isDefault", s.getIsDefault());
+            spec.put("appId", s.getAppId());
+            spec.put("mchId", s.getMchId());
+            spec.put("mchSerialNo", s.getMchSerialNo());
+            spec.put("notifyUrl", s.getNotifyUrl());
+            spec.put("offlineInstruction", s.getOfflineInstruction());
+            spec.put("remark", s.getRemark());
+            spec.put("apiV3Key", null);
+            spec.put("mchPrivateKey", null);
+            spec.put("apiV3KeySet", SecretStore.isConfigured(s.getApiV3Key()));
+            spec.put("mchPrivateKeySet", SecretStore.isConfigured(s.getMchPrivateKey()));
+        }
+        out.put("spec", spec);
+        return out;
+    }
+
+    /**
+     * 敏感字段落库前加密；未提交（null）保留旧密文，空串表示清空。
+     */
+    private void encryptSecrets(PaymentConfig.PaymentConfigSpec spec,
+        PaymentConfig.PaymentConfigSpec old) {
+        if (spec == null) {
+            return;
+        }
+        spec.setApiV3Key(mergeSecret(spec.getApiV3Key(), old == null ? null : old.getApiV3Key()));
+        spec.setMchPrivateKey(mergeSecret(spec.getMchPrivateKey(),
+            old == null ? null : old.getMchPrivateKey()));
+    }
+
+    private String mergeSecret(String incoming, String oldCipher) {
+        if (incoming == null) {
+            return oldCipher;
+        }
+        if (incoming.isBlank()) {
+            return null;
+        }
+        return secretStore.encrypt(incoming);
     }
 
     private Mono<ServerResponse> createConfig(ServerRequest request) {
@@ -392,11 +464,13 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                 }
                 String ct = pc.getSpec().getChannelType() == null ? "wechat_native"
                     : pc.getSpec().getChannelType();
-                // 微信渠道必须配置商户号；线下/支付宝不强制
+                // 微信渠道必须配置商户号；线下渠道不强制
                 if (("wechat_native".equals(ct) || "wechat_jsapi".equals(ct))
                     && (pc.getSpec().getMchId() == null || pc.getSpec().getMchId().isBlank())) {
                     return Mono.error(new PropertyFeeException("微信渠道商户号不能为空"));
                 }
+                // 敏感字段（私钥/APIv3 密钥）加密落库
+                encryptSecrets(pc.getSpec(), null);
                 return client.create(pc);
             })
             .flatMap(pc -> ServerResponse.ok().bodyValue(pc))
@@ -412,6 +486,8 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                     if (pc.getMetadata().getVersion() == null) {
                         pc.getMetadata().setVersion(existing.getMetadata().getVersion());
                     }
+                    // 未提交的敏感字段保留旧密文，避免局部保存清空凭据
+                    encryptSecrets(pc.getSpec(), existing.getSpec());
                     return client.update(pc);
                 }))
             .flatMap(pc -> ServerResponse.ok().bodyValue(pc))
@@ -432,6 +508,66 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
         return listAll(FeeRecord.class)
             .map(list -> new ListResult<>(list))
             .flatMap(r -> ServerResponse.ok().bodyValue(r))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /**
+     * 确认线下缴费到账（管理员操作）。
+     *
+     * <p>安全约束：只有「待核实到账（PENDING_CONFIRM）」的订单可以确认；
+     * 入账只发生在这里，业主提交申请本身不改变缴费状态；
+     * 同时记录操作人与时间，形成可审计的到账凭证。
+     */
+    private Mono<ServerResponse> confirmOfflinePayment(ServerRequest request) {
+        String name = request.pathVariable("name");
+        return request.principal().map(java.security.Principal::getName).defaultIfEmpty("unknown")
+            .flatMap(operator -> client.fetch(FeeRecord.class, name)
+                .switchIfEmpty(Mono.error(new PropertyFeeException("缴费记录不存在")))
+                .flatMap(rec -> {
+                    var spec = rec.getSpec();
+                    if (spec == null) {
+                        return Mono.error(new PropertyFeeException("缴费记录数据不完整"));
+                    }
+                    if (!"PENDING_CONFIRM".equals(spec.getStatus())) {
+                        return Mono.error(new PropertyFeeException(
+                            "仅「待核实到账」的线下缴费可确认，当前状态：" + spec.getStatus()));
+                    }
+                    java.time.Instant now = java.time.Instant.now();
+                    spec.setStatus("PAID");
+                    spec.setPaidAt(now);
+                    spec.setPaidAmount(spec.getTotalAmount());
+                    spec.setTransactionId("OFFLINE-" + name);
+                    spec.setConfirmedBy(operator);
+                    spec.setConfirmedAt(now);
+                    return client.update(rec);
+                })
+                .then(ServerResponse.ok().bodyValue(Map.of(
+                    "success", true, "message", "已确认到账并完成入账"))))
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 驳回线下缴费申请（未收到款）：订单关闭，不计入收缴。 */
+    private Mono<ServerResponse> rejectOfflinePayment(ServerRequest request) {
+        String name = request.pathVariable("name");
+        return request.principal().map(java.security.Principal::getName).defaultIfEmpty("unknown")
+            .flatMap(operator -> client.fetch(FeeRecord.class, name)
+                .switchIfEmpty(Mono.error(new PropertyFeeException("缴费记录不存在")))
+                .flatMap(rec -> {
+                    var spec = rec.getSpec();
+                    if (spec == null) {
+                        return Mono.error(new PropertyFeeException("缴费记录数据不完整"));
+                    }
+                    if (!"PENDING_CONFIRM".equals(spec.getStatus())) {
+                        return Mono.error(new PropertyFeeException(
+                            "仅「待核实到账」的线下缴费可驳回，当前状态：" + spec.getStatus()));
+                    }
+                    spec.setStatus("CLOSED");
+                    spec.setConfirmedBy(operator);
+                    spec.setConfirmedAt(java.time.Instant.now());
+                    return client.update(rec);
+                })
+                .then(ServerResponse.ok().bodyValue(Map.of(
+                    "success", true, "message", "已驳回该线下缴费申请"))))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
 
@@ -746,58 +882,101 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
             .map(cfg -> {
                 Map<String, Object> m = new java.util.HashMap<>();
                 m.put("metadata", cfg.getMetadata());
-                m.put("spec", cfg.getSpec());
+                m.put("spec", safeSystemSpec(cfg.getSpec()));
                 return m;
             })
-            .switchIfEmpty(Mono.just(Map.of("spec", new SystemConfig.SystemConfigSpec())))
+            .switchIfEmpty(Mono.defer(() -> {
+                Map<String, Object> m = new java.util.HashMap<>();
+                m.put("spec", safeSystemSpec(new SystemConfig.SystemConfigSpec()));
+                return Mono.just(m);
+            }))
             .flatMap(body -> ServerResponse.ok().bodyValue(body));
     }
 
-    private Mono<ServerResponse> updateSystemConfig(ServerRequest request) {
-        // Halo 2.26 大 body 竞态：配置较长走 query 通道 ?data=<base64url(JSON)>（pay 同款方案，稳定）
-        String q = request.queryParam("data").orElse("");
-        Mono<SystemConfig.SystemConfigSpec> specMono;
-        if (hasText(q)) {
-            specMono = Mono.fromCallable(() -> {
-                try {
-                    byte[] dec = java.util.Base64.getUrlDecoder().decode(q);
-                    return MAPPER.readValue(dec, SystemConfig.SystemConfigSpec.class);
-                } catch (Exception e) {
-                    throw new PropertyFeeException("配置参数解析失败，请重试");
-                }
-            });
-        } else {
-            specMono = parseBody(request, SystemConfig.SystemConfigSpec.class);
+    /** 输出视图：短信 SecretKey / 公众号 AppSecret 一律不回传明文。 */
+    private static Map<String, Object> safeSystemSpec(SystemConfig.SystemConfigSpec spec) {
+        Map<String, Object> s = new java.util.HashMap<>();
+        if (spec == null) {
+            return s;
         }
-        return specMono
-            .flatMap(spec -> client.fetch(SystemConfig.class, SystemConfig.FIXED_NAME)
-                .map(cfg -> {
-                    // 合并语义：前端未传（null）的凭据/秘钥字段保留旧值，
-                    // 防止 UI 局部保存把平台注入的 SecretId/AppSecret 等清空。
-                    SystemConfig.SystemConfigSpec old = cfg.getSpec();
-                    if (old != null) {
-                        if (spec.getSmsSecretId() == null) spec.setSmsSecretId(old.getSmsSecretId());
-                        if (spec.getSmsSecretKey() == null) spec.setSmsSecretKey(old.getSmsSecretKey());
-                        if (spec.getSmsSdkAppId() == null) spec.setSmsSdkAppId(old.getSmsSdkAppId());
-                        if (spec.getSmsSignName() == null) spec.setSmsSignName(old.getSmsSignName());
-                        if (spec.getSmsTemplateId() == null) spec.setSmsTemplateId(old.getSmsTemplateId());
-                        if (spec.getWxAppId() == null) spec.setWxAppId(old.getWxAppId());
-                        if (spec.getWxAppSecret() == null) spec.setWxAppSecret(old.getWxAppSecret());
-                    }
-                    cfg.setSpec(spec);
-                    return cfg;
-                })
-                .flatMap(client::update)
-                .switchIfEmpty(Mono.defer(() -> {
-                    SystemConfig cfg = new SystemConfig();
-                    var meta = new run.halo.app.extension.Metadata();
-                    meta.setName(SystemConfig.FIXED_NAME);
-                    cfg.setMetadata(meta);
-                    cfg.setSpec(spec);
-                    return client.create(cfg);
-                }))
-                .then(ServerResponse.ok().bodyValue(Map.of(
-                    "success", true, "message", "系统配置已保存"))))
+        s.put("smsEnabled", spec.getSmsEnabled());
+        s.put("smsSecretId", spec.getSmsSecretId());
+        s.put("smsSecretKey", null);
+        s.put("smsSecretKeySet", SecretStore.isConfigured(spec.getSmsSecretKey()));
+        s.put("smsSdkAppId", spec.getSmsSdkAppId());
+        s.put("smsSignName", spec.getSmsSignName());
+        s.put("smsTemplateId", spec.getSmsTemplateId());
+        s.put("wxEnabled", spec.getWxEnabled());
+        s.put("wxAppId", spec.getWxAppId());
+        s.put("wxAppSecret", null);
+        s.put("wxAppSecretSet", SecretStore.isConfigured(spec.getWxAppSecret()));
+        s.put("wxRedirectBase", spec.getWxRedirectBase());
+        s.put("frontUrl", spec.getFrontUrl());
+        return s;
+    }
+
+    /**
+     * 保存系统配置。
+     *
+     * <p>安全要求：<b>不再支持通过 URL（?data=…）传递配置</b>，一律走请求体；
+     * 请求体用「原样读取 + 手动反序列化」的方式规避 Halo 2.26 对象解码竞态；
+     * 敏感字段加密落库，未提交（null）保留旧值、空串表示清空。
+     */
+    private Mono<ServerResponse> updateSystemConfig(ServerRequest request) {
+        return readRawBody(request)
+            .flatMap(body -> {
+                if (body == null || body.isBlank()) {
+                    return Mono.error(new PropertyFeeException("请求体不能为空"));
+                }
+                SystemConfig.SystemConfigSpec incoming;
+                try {
+                    incoming = MAPPER.readValue(body, SystemConfig.SystemConfigSpec.class);
+                } catch (Exception e) {
+                    return Mono.error(new PropertyFeeException("配置参数解析失败，请重试"));
+                }
+                return client.fetch(SystemConfig.class, SystemConfig.FIXED_NAME)
+                    .flatMap(existing -> {
+                        encryptSystemSecrets(incoming, existing.getSpec());
+                        existing.setSpec(incoming);
+                        return client.update(existing);
+                    })
+                    .switchIfEmpty(Mono.defer(() -> {
+                        encryptSystemSecrets(incoming, null);
+                        SystemConfig cfg = new SystemConfig();
+                        var meta = new run.halo.app.extension.Metadata();
+                        meta.setName(SystemConfig.FIXED_NAME);
+                        cfg.setMetadata(meta);
+                        cfg.setSpec(incoming);
+                        return client.create(cfg);
+                    }))
+                    .then(ServerResponse.ok().bodyValue(Map.of(
+                        "success", true, "message", "系统配置已保存")));
+            })
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
     }
+
+    private void encryptSystemSecrets(SystemConfig.SystemConfigSpec spec,
+        SystemConfig.SystemConfigSpec old) {
+        if (spec == null) {
+            return;
+        }
+        spec.setSmsSecretKey(mergeSecret(spec.getSmsSecretKey(),
+            old == null ? null : old.getSmsSecretKey()));
+        spec.setWxAppSecret(mergeSecret(spec.getWxAppSecret(),
+            old == null ? null : old.getWxAppSecret()));
+    }
+
+    /** 原样读取请求体（避免 Halo 2.26 长 body 对象解码竞态；也用于验签场景）。 */
+    private static Mono<String> readRawBody(ServerRequest request) {
+        return org.springframework.core.io.buffer.DataBufferUtils
+            .join(request.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class))
+            .map(buf -> {
+                byte[] bytes = new byte[buf.readableByteCount()];
+                buf.read(bytes);
+                org.springframework.core.io.buffer.DataBufferUtils.release(buf);
+                return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            })
+            .defaultIfEmpty("");
+    }
+
 }
