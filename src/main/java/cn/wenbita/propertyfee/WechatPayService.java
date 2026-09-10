@@ -170,7 +170,12 @@ public class WechatPayService {
         String nonceStr, long timestamp, String privateKeyPem) throws Exception {
         String message = method + "\n" + urlPath + "\n" + timestamp + "\n" + nonceStr + "\n"
             + body + "\n";
-        // 兼容私钥中字面 \\n（双重转义存储）与真实换行：先还原真实换行
+        return signMessage(message, privateKeyPem);
+    }
+
+    /** 用商户私钥对任意报文做 SHA256withRSA 签名（JSAPI 支付参数签名复用）。 */
+    private String signMessage(String message, String privateKeyPem) throws Exception {
+        // 兼容私钥中字面 \n（双重转义存储）与真实换行：先还原真实换行
         String pemText = privateKeyPem.replace("\\n", "\n").replace("\\r", "");
         // 只提取 BEGIN 行之后、END 行之前的 base64 内容（PEM 头尾字母不能混入）
         int beginIdx = pemText.indexOf("BEGIN");
@@ -331,6 +336,35 @@ public class WechatPayService {
             "payer", Map.of("openid", openid)
         );
         return doRequest(pc, "POST", urlPath, body);
+    }
+
+    /**
+     * 组装微信内 JSAPI 支付参数（供前端 WeixinJSBridge 调用），含 RSA 签名。
+     * 待签名串格式：appId\ntimeStamp\nnonceStr\npackage\n
+     */
+    public Map<String, Object> buildJsapiParams(PaymentConfig pc, String prepayId) {
+        if (prepayId == null || prepayId.isBlank()) {
+            throw new PropertyFeeException("微信未返回 prepay_id，无法发起微信内支付");
+        }
+        String timeStamp = String.valueOf(System.currentTimeMillis() / 1000);
+        String nonceStr = randomString(32);
+        String pkg = "prepay_id=" + prepayId;
+        String message = pc.getSpec().getAppId() + "\n" + timeStamp + "\n" + nonceStr + "\n"
+            + pkg + "\n";
+        String paySign;
+        try {
+            paySign = signMessage(message, privateKeyOf(pc));
+        } catch (Exception e) {
+            throw new PropertyFeeException("微信内支付签名失败: " + e.getMessage());
+        }
+        Map<String, Object> params = new java.util.LinkedHashMap<>();
+        params.put("appId", pc.getSpec().getAppId());
+        params.put("timeStamp", timeStamp);
+        params.put("nonceStr", nonceStr);
+        params.put("package", pkg);
+        params.put("signType", "RSA");
+        params.put("paySign", paySign);
+        return params;
     }
 
     /**

@@ -208,109 +208,128 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .footer { text-align: center; padding: 20px 0 10px; font-size: 12px; color: #9ca3af; }
   .hidden { display: none !important; }
+
+  /* ---- 登录 / 绑定 ---- */
+  .login-note { font-size: 12px; color: var(--text-light); text-align: center; margin-top: 8px; }
+  .login-tip { font-size: 12px; color: #9ca3af; line-height: 1.6; margin-top: 10px; }
+  .hint { font-size: 13px; color: var(--text-light); line-height: 1.6; margin-bottom: 14px; }
+  .divider { display: flex; align-items: center; margin: 16px 0; color: #c0c8d4; font-size: 12px; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .divider span { padding: 0 10px; }
+  .code-row { display: flex; gap: 8px; align-items: stretch; }
+  .code-row input { flex: 1; }
+  .btn-sm { width: auto; padding: 12px 14px; font-size: 13px; border-radius: 10px; white-space: nowrap; }
+  .btn-ghost { background: #f0f4ff; color: var(--primary); border: 1px solid #c6d4ef; }
+  .btn-ghost:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
+  .link { color: var(--primary); font-size: 13px; text-decoration: none; cursor: pointer; }
+  .link:hover { text-decoration: underline; }
+
+  /* ---- 已登录信息条 ---- */
+  .userbar { display: flex; align-items: center; gap: 10px; font-size: 14px; flex-wrap: wrap; }
+  .userbar .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  .userbar .who { color: var(--primary-dark); font-weight: 600; }
+  .userbar .spacer { flex: 1; }
+
+  /* ---- 房屋卡片 ---- */
+  .house-card { padding: 18px 20px; }
+  .house-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .house-title { font-size: 16px; font-weight: 700; color: var(--primary-dark); }
+  .house-sub { font-size: 13px; color: var(--text-light); margin-top: 5px; }
+  .year-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px dashed var(--border); }
+  .year-row:last-of-type { border-bottom: none; }
+  .y-left { display: flex; align-items: center; gap: 8px; }
+  .y-year { font-size: 15px; font-weight: 600; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 20px; line-height: 1.7; white-space: nowrap; }
+  .badge-paid { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; }
+  .badge-unpaid { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+  .y-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .y-amt { font-size: 15px; font-weight: 700; color: var(--text); }
+  .y-date { font-size: 12px; color: var(--success); }
+  .pay-btn { display: inline-block; padding: 8px 16px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .pay-btn:active { transform: scale(0.97); }
+  .pay-btn:disabled { background: #c5d2e4; cursor: not-allowed; }
+  .house-total { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text-light); }
+  .house-total b { font-size: 20px; font-weight: 700; color: var(--danger); }
+  .empty { text-align: center; color: var(--text-light); font-size: 14px; padding: 18px 6px; line-height: 1.7; }
+  .empty-sm { color: var(--text-light); font-size: 13px; padding: 10px 0; }
+
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>🏠 物业费在线缴纳</h1>
-  <p>选择房屋信息，在线查询并缴纳物业费</p>
+  <p>登录后查看名下房屋与各年度缴费情况</p>
 </div>
 
 <div class="container">
-  <!-- 已缴状态 -->
-  <div id="paidBanner" class="paid-banner hidden">
-    <div class="icon">✅</div>
-    <div class="text" id="paidText">该房号物业费已缴纳</div>
-    <div class="sub" id="paidSub"></div>
+
+  <!-- 登录区：未登录时仅显示此区块 -->
+  <div class="card" id="loginCard">
+    <div class="card-title"><span class="step">1</span>登录业主账号</div>
+    <button class="btn btn-wechat" onclick="wxLogin()">⚡ 微信一键登录</button>
+    <div class="login-note">已绑定微信的业主，授权后自动识别名下房屋</div>
+    <div class="divider"><span>或手机验证码登录</span></div>
+    <div class="form-group">
+      <label>手机号</label>
+      <input id="ownerPhone" placeholder="请输入业主手机号" maxlength="11" inputmode="numeric">
+    </div>
+    <div class="form-group">
+      <label>短信验证码</label>
+      <div class="code-row">
+        <input id="ownerCode" placeholder="6 位验证码" maxlength="6" inputmode="numeric">
+        <button class="btn btn-sm btn-ghost" id="btnSendCode" onclick="sendOwnerCode()">获取验证码</button>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btnPhoneLogin" onclick="ownerLogin()">登录</button>
+    <div class="status-msg" id="ownerMsg"></div>
+    <div class="login-tip">登录后可查看并缴纳本人名下房屋的物业费；如信息有误，请联系物业核对业主档案。</div>
   </div>
 
-  <!-- 第一步：选择房屋 -->
-  <div class="card" id="cardStep1">
-    <div class="card-title"><span class="step">1</span>选择房屋</div>
+  <!-- 首次微信登录：绑定业主身份（needBind=true） -->
+  <div class="card hidden" id="bindCard">
+    <div class="card-title"><span class="step">1</span>绑定业主身份</div>
+    <div class="hint">首次使用微信登录，请填写在物业登记的业主信息完成绑定；绑定成功后，此后微信一键登录无需再次验证。</div>
     <div class="form-group">
-      <label>小区</label>
-      <div class="select-wrap">
-        <select id="selCommunity" onchange="onCommunityChange()">
-          <option value="">请选择小区</option>
-        </select>
-      </div>
+      <label>手机号</label>
+      <input id="bindPhone" placeholder="请输入业主手机号" maxlength="11" inputmode="numeric">
     </div>
     <div class="form-group">
-      <label>楼栋</label>
-      <div class="select-wrap">
-        <select id="selBuilding" onchange="onBuildingChange()" disabled>
-          <option value="">请先选择小区</option>
-        </select>
-      </div>
+      <label>业主姓名</label>
+      <input id="bindName" placeholder="请填写与物业登记一致的姓名">
     </div>
-    <div class="form-group">
-      <label>房号</label>
-      <div class="select-wrap">
-        <select id="selRoom" onchange="updateQueryBtn()" disabled>
-          <option value="">请先选择楼栋</option>
-        </select>
+    <button class="btn btn-primary" onclick="wxBindByName()">确认绑定</button>
+    <div class="status-msg" id="bindMsg"></div>
+    <div class="hidden" id="bindSmsBox" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border)">
+      <div class="form-group">
+        <label>短信验证码</label>
+        <div class="code-row">
+          <input id="bindCode" placeholder="6 位验证码" maxlength="6" inputmode="numeric">
+          <button class="btn btn-sm btn-ghost" id="btnBindSendCode" onclick="sendBindCode()">获取验证码</button>
+        </div>
       </div>
+      <button class="btn btn-primary" onclick="wxBindBySms()">短信验证绑定</button>
     </div>
-    <div class="form-group">
-      <label>缴费年份</label>
-      <div class="select-wrap">
-        <select id="selYear"></select>
-      </div>
+    <div style="text-align:center;margin-top:12px">
+      <a href="javascript:void(0)" class="link hidden" id="useSmsLink" onclick="showBindSms()">改用短信验证码绑定</a>
     </div>
-    <button class="btn btn-primary" id="btnQuery" onclick="queryFee()" disabled>查询物业费</button>
-    <div class="status-msg" id="msgStep1"></div>
   </div>
 
-  <!-- 第二步：费用明细 -->
-  <div class="card hidden" id="cardStep2">
-    <div class="card-title"><span class="step">2</span>费用明细</div>
-    <div class="fee-property" id="feeProperty"></div>
-    <div class="fee-detail" id="feeDetail"></div>
-    <div class="form-group" id="channelGroup" style="margin-top:14px">
-      <label>支付方式</label>
-      <div class="select-wrap">
-        <select id="selChannel" onchange="onChannelChange()"></select>
-      </div>
-      <div id="offlineInfo" class="status-msg info hidden"></div>
+  <!-- 已登录信息条 -->
+  <div class="card hidden" id="loggedCard">
+    <div class="userbar">
+      <span class="avatar">👤</span>
+      <span class="who" id="loginUserTxt"></span>
+      <span class="spacer"></span>
+      <a href="javascript:void(0)" class="link" onclick="logoutOwner()">退出</a>
     </div>
-    <!-- 业主身份验证（防缴错费） -->
-    <div id="ownerBox" style="margin-top:16px;border:1px dashed #d0d7e2;border-radius:10px;padding:14px 16px;background:#fafcff">
-      <div id="ownerLogged" class="hidden" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:15px">✅ 业主身份已认证</span>
-        <b id="ownerNameTxt" style="color:#0a2a5e"></b>
-        <span id="ownerPhoneTxt" style="color:#66788f;font-size:13px"></span>
-        <span id="ownerHouseTxt" style="color:#389e0d;font-size:12px"></span>
-        <span style="flex:1"></span>
-        <a href="javascript:logoutOwner()" style="color:#1a4f9e;font-size:13px">切换业主</a>
-      </div>
-      <div id="ownerLoginForm">
-        <div style="font-size:13px;color:#0a2a5e;font-weight:600;margin-bottom:8px">🔐 业主验证（仅限本房屋登记业主缴费）</div>
-        <!-- 微信一键登录（复用平台服务号） -->
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-          <a href="javascript:wxLogin()" style="flex:1;text-align:center;padding:10px 0;background:#07C160;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;min-width:150px">⚡ 微信一键登录</a>
-          <span style="color:#99a3b3;font-size:12px">微信授权后自动识别业主</span>
-        </div>
-        <div id="wxFirstHint" class="hidden" style="background:#f0fff6;border:1px solid #b7ebc5;color:#135200;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:13px">
-          👋 首次使用微信登录：请在下方输入您的<b>业主手机号</b>并获取验证码，验证通过后即完成绑定，此后微信一键登录免验证码。
-        </div>
-        <div style="display:flex;align-items:center;margin:8px 0;color:#c0c8d4;font-size:12px"><span style="flex:1;height:1px;background:#e3e8f0"></span><span style="padding:0 8px">或手机验证码登录</span><span style="flex:1;height:1px;background:#e3e8f0"></span></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="ownerPhone" placeholder="业主手机号" maxlength="11" inputmode="numeric" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid #d0d7e2;border-radius:6px;font-size:14px" />
-          <button class="btn btn-sm" id="btnSendCode" onclick="sendOwnerCode()" style="padding:9px 14px;background:#f0f4ff;color:#1a4f9e;border:1px solid #c6d4ef;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap">获取验证码</button>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <input id="ownerCode" placeholder="6位短信验证码" maxlength="6" inputmode="numeric" style="flex:1;min-width:120px;padding:9px 10px;border:1px solid #d0d7e2;border-radius:6px;font-size:14px" />
-          <button class="btn btn-primary" onclick="ownerLogin()" style="padding:9px 18px;border-radius:6px;font-size:13px;white-space:nowrap">验证并解锁缴费</button>
-        </div>
-        <div class="status-msg" id="ownerMsg"></div>
-        <div style="color:#99a3b3;font-size:12px;margin-top:6px">登录后只能缴纳本人名下房屋的费用；多人共有的房屋，任一登记业主均可缴费。如有疑问请联系物业核对业主档案。</div>
-      </div>
-    </div>
-    <button class="btn btn-wechat" id="btnPay" onclick="payFee()" style="margin-top:16px">微信支付</button>
-    <div class="status-msg" id="msgStep2"></div>
-    <div class="loading" id="payLoading"><span class="spinner"></span>正在拉起支付…</div>
   </div>
+
+  <!-- 我名下的房屋 -->
+  <div id="housesWrap"></div>
+  <div class="loading" id="housesLoading"><span class="spinner"></span>正在加载名下房屋…</div>
+  <div class="status-msg" id="housesMsg"></div>
+  <div class="loading" id="payLoading"><span class="spinner"></span>正在拉起支付…</div>
 
   <div class="footer">
     文山州互联网协会 · 技术服务<br>如遇问题请联系物业服务中心
@@ -335,532 +354,398 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 </script>
 <script>
 const API = '/apis/api.propertyfee.halo.run/v1alpha1';
-let options = null;
-let currentFee = null;
+const OWNER_KEY = 'pf_owner_info';
+window._wxOpenid = window._wxOpenid || '';
+window._houses = [];
 
-async function apiGet(path) {
-  const res = await fetch(API + path, { headers: { 'Accept': 'application/json' } });
-  if (!res.ok) throw new Error('请求失败 ' + res.status);
-  return res.json();
+/* ================= 基础请求 ================= */
+async function apiGet(path, headers) {
+  const res = await fetch(API + path, { headers: Object.assign({ 'Accept': 'application/json' }, headers || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.detail || ('请求失败 ' + res.status));
+  return data;
 }
 
 async function apiPost(path, body, headers) {
   const res = await fetch(API + path, {
     method: 'POST',
     headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
-    body: JSON.stringify(body)
+    body: JSON.stringify(body || {})
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || data.detail || '请求失败');
   return data;
 }
 
+function $(id) { return document.getElementById(id); }
+function show(el) { if (el) el.classList.remove('hidden'); }
+function hide(el) { if (el) el.classList.add('hidden'); }
 function showMsg(el, text, type) {
-  el.textContent = text;
-  el.className = 'status-msg ' + type;
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'status-msg' + (type ? ' ' + type : '');
 }
+function inWechat() { return /MicroMessenger/i.test(navigator.userAgent); }
 
-// 初始化年份（今年-3 ~ 今年+1）
-function initYears() {
-  const y = new Date().getFullYear();
-  const sel = document.getElementById('selYear');
-  sel.innerHTML = '';
-  for (let i = y - 3; i <= y + 1; i++) {
-    const opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = i + ' 年';
-    if (i === y) opt.selected = true;
-    sel.appendChild(opt);
-  }
-}
-
-async function loadOptions() {
-  const btn = document.getElementById('btnQuery');
-  btn.disabled = true;
-  btn.textContent = '加载中…';
-  try {
-    options = await apiGet('/properties/options');
-    const selC = document.getElementById('selCommunity');
-    selC.innerHTML = '<option value="">请选择小区</option>';
-    (options.communities || []).forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c; opt.textContent = c;
-      selC.appendChild(opt);
-    });
-    if ((options.communities || []).length === 0) {
-      showMsg(document.getElementById('msgStep1'), '暂无可查询的房屋数据，请联系物业', 'err');
-    }
-  } catch (e) {
-    showMsg(document.getElementById('msgStep1'), '加载小区失败：' + e.message, 'err');
-  } finally {
-    btn.textContent = '查询物业费';
-    btn.disabled = true;
-  }
-}
-
-function onCommunityChange() {
-  const c = document.getElementById('selCommunity').value;
-  const selB = document.getElementById('selBuilding');
-  const selR = document.getElementById('selRoom');
-  selR.innerHTML = '<option value="">请先选择楼栋</option>';
-  selR.disabled = true;
-  selB.innerHTML = '<option value="">请选择楼栋</option>';
-  selB.disabled = !c;
-  if (c) {
-    (options.buildings[c] || []).forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      selB.appendChild(opt);
-    });
-  }
-  updateQueryBtn();
-}
-
-function onBuildingChange() {
-  const c = document.getElementById('selCommunity').value;
-  const b = document.getElementById('selBuilding').value;
-  const selR = document.getElementById('selRoom');
-  selR.innerHTML = '<option value="">请选择房号</option>';
-  selR.disabled = !b;
-  if (b) {
-    (options.rooms[c + '|' + b] || []).forEach(r => {
-      const opt = document.createElement('option');
-      opt.value = r; opt.textContent = r + ' 室';
-      selR.appendChild(opt);
-    });
-  }
-  updateQueryBtn();
-}
-
-function updateQueryBtn() {
-  const c = document.getElementById('selCommunity').value;
-  const b = document.getElementById('selBuilding').value;
-  const r = document.getElementById('selRoom').value;
-  document.getElementById('btnQuery').disabled = !(c && b && r);
-}
-
-async function queryFee() {
-  const c = document.getElementById('selCommunity').value;
-  const b = document.getElementById('selBuilding').value;
-  const r = document.getElementById('selRoom').value;
-  const y = parseInt(document.getElementById('selYear').value);
-  const btn = document.getElementById('btnQuery');
-  const msg = document.getElementById('msgStep1');
-
-  btn.disabled = true;
-  btn.textContent = '查询中…';
-  showMsg(msg, '', '');
-  try {
-    const data = await apiPost('/properties/fee-query', { community: c, building: b, room: r, year: y });
-    currentFee = data;
-    renderFee(data);
-    document.getElementById('cardStep2').classList.remove('hidden');
-    document.getElementById('cardStep1').classList.add('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    showMsg(msg, '', '');
-  } catch (e) {
-    showMsg(msg, e.message, 'err');
-  } finally {
-    btn.textContent = '查询物业费';
-    btn.disabled = !(c && b && r);
-  }
-}
-
-function renderFee(data) {
-  const p = data.property;
-  document.getElementById('feeProperty').innerHTML = `
-    <div class="p-item"><span class="k">小区</span>${p.community}</div>
-    <div class="p-item"><span class="k">房号</span>${p.building} ${p.room} 室</div>
-    <div class="p-item"><span class="k">业主</span>${p.ownerName ? p.ownerName : (p.ownerVerified ? '—' : '登录后可见')}</div>
-    <div class="p-item"><span class="k">面积</span>${data.area} ㎡</div>
-    ${p.propertyType ? `<div class="p-item"><span class="k">类型</span>${p.propertyType}</div>` : ''}
-  `;
-  let html = '';
-  if (data.unitPrice) {
-    const months = { year: 12, half: 6, quarter: 3, month: 1 }[data.billingCycle] || 12;
-    html += `<div class="fee-row"><span class="label">物业费（${data.unitPrice}元/㎡·月 × ${months}月）</span><span class="value">¥${data.propertyFee.toFixed(2)}</span></div>`;
-  }
-  (data.extraFees || []).forEach(f => {
-    html += `<div class="fee-row"><span class="label">${f.name}</span><span class="value">¥${f.amount.toFixed(2)}</span></div>`;
-  });
-  if (data.discountAmount > 0) {
-    html += `<div class="fee-row" style="color:#389e0d"><span class="label">优惠减免</span><span class="value">-¥${data.discountAmount.toFixed(2)}</span></div>`;
-  }
-  html += `<div class="fee-row total"><span class="label">应缴合计（${data.year} 年）</span><span class="value">¥${data.totalAmount.toFixed(2)}</span></div>`;
-  document.getElementById('feeDetail').innerHTML = html;
-
-  // 支付渠道
-  renderChannels(data.channels || []);
-
-  // 已缴状态
-  const paidBanner = document.getElementById('paidBanner');
-  const btnPay = document.getElementById('btnPay');
-  if (data.paid) {
-    paidBanner.classList.remove('hidden');
-    document.getElementById('paidText').textContent = data.message;
-    document.getElementById('paidSub').textContent = '缴纳时间：' + (data.paidAt || '') + '　·　如需查询缴费凭证请联系物业';
-    btnPay.classList.add('hidden');
-    document.getElementById('channelGroup').classList.add('hidden');
-  } else {
-    paidBanner.classList.add('hidden');
-    btnPay.classList.remove('hidden');
-    document.getElementById('channelGroup').classList.remove('hidden');
-  }
-  // V4：若已登录业主，自动恢复认证态并校验是否名下房屋
-  const stored = getOwnerInfo();
-  if (stored) renderOwnerLogged(stored);
-}
-
-// 渲染支付渠道下拉
-function renderChannels(channels) {
-  const sel = document.getElementById('selChannel');
-  const grp = document.getElementById('channelGroup');
-  const offlineInfo = document.getElementById('offlineInfo');
-  if (!channels || !channels.length) {
-    grp.classList.add('hidden');
-    return;
-  }
-  grp.classList.remove('hidden');
-  sel.innerHTML = '';
-  channels.forEach((ch, i) => {
-    const opt = document.createElement('option');
-    opt.value = ch.channelName || ch.channelType;
-    opt.textContent = (ch.isDefault ? '⭐ ' : '') + ch.channelName + '（' + channelTypeText(ch.channelType) + '）';
-    sel.appendChild(opt);
-  });
-  // 更新按钮文字与线下说明
-  onChannelChange();
-  // 记录渠道列表供 payFee 使用
-  window.currentChannels = channels;
-}
-
-function channelTypeText(t) {
-  return { wechat_native: '扫码', wechat_jsapi: '公众号', offline: '线下' }[t] || t;
-}
-
-function onChannelChange() {
-  const sel = document.getElementById('selChannel');
-  const btn = document.getElementById('btnPay');
-  const offlineInfo = document.getElementById('offlineInfo');
-  const channels = window.currentChannels || [];
-  const name = sel.value;
-  const ch = channels.find(c => (c.channelName || c.channelType) === name);
-  if (!ch) return;
-  if (ch.channelType === 'offline') {
-    btn.textContent = '提交线下缴费申请';
-    if (ch.offlineInstruction) {
-      offlineInfo.textContent = '线下缴费说明：' + ch.offlineInstruction
-        + '（提交后由物业核实到账再确认入账）';
-      offlineInfo.classList.remove('hidden');
-    } else {
-      offlineInfo.textContent = '线下缴费：请联系物业完成缴费，提交申请后由物业核实到账再确认入账';
-      offlineInfo.classList.remove('hidden');
-    }
-  } else if (ch.channelType === 'wechat_native') {
-    btn.textContent = '微信扫码支付';
-    offlineInfo.classList.add('hidden');
-  } else if (ch.channelType === 'wechat_jsapi') {
-    btn.textContent = '微信支付';
-    offlineInfo.classList.add('hidden');
-  } else {
-    btn.textContent = '确认支付';
-    offlineInfo.classList.add('hidden');
-  }
-}
-
-/* ============ V4 业主登录（手机验证码） ============ */
-let pendingPay = false;   // 未登录点了支付，登录成功后自动继续
-const OWNER_KEY = 'pf_owner_info';
-let codeCountdown = null;
-
+/* ================= 本地登录态 ================= */
 function getOwnerInfo() {
-  try {
-    return JSON.parse(localStorage.getItem(OWNER_KEY) || 'null');
-  } catch (e) { return null; }
+  try { return JSON.parse(localStorage.getItem(OWNER_KEY) || 'null'); } catch (e) { return null; }
 }
-
 function setOwnerInfo(info) {
   if (info) localStorage.setItem(OWNER_KEY, JSON.stringify(info));
   else localStorage.removeItem(OWNER_KEY);
 }
+function maskPhone(p) {
+  if (!p) return '';
+  return /^\d{11}$/.test(p) ? p.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') : p;
+}
 
-/* ===== 微信一键登录（复用平台服务号，经 aiedu.yn.cn 授权域名回调） ===== */
-function getOwnerMsg() { return document.getElementById('ownerMsg'); }
+/* ================= 视图切换 ================= */
+function showLogin() {
+  hide($('bindCard')); hide($('loggedCard')); hide($('housesLoading')); hide($('payLoading'));
+  hide($('housesWrap'));
+  $('housesWrap').innerHTML = '';
+  show($('loginCard'));
+}
+function showBindCard() {
+  hide($('loginCard')); hide($('loggedCard')); hide($('housesWrap'));
+  hide($('bindSmsBox')); hide($('useSmsLink'));
+  show($('bindCard'));
+}
+function showBindSms() { show($('bindSmsBox')); hide($('useSmsLink')); }
+function showUseSmsLink() { show($('useSmsLink')); }
 
+function renderUserBar(i) {
+  const who = ((i.name ? i.name : '') + ' ' + maskPhone(i.phone || '')).trim();
+  $('loginUserTxt').textContent = '已登录：' + (who || '业主');
+}
+function enterLogged(info) {
+  const i = info || getOwnerInfo();
+  if (!i || !i.token) { showLogin(); return; }
+  hide($('loginCard')); hide($('bindCard'));
+  show($('loggedCard'));
+  renderUserBar(i);
+  loadHouses();
+}
+
+/* ================= 微信一键登录 ================= */
 async function wxLogin() {
-  const msg = getOwnerMsg();
+  const msg = $('ownerMsg');
   const clean = location.origin + location.pathname;
   try {
     const data = await apiPost('/wx/authorize?redirect=' + encodeURIComponent(clean), {});
-    if (data.url) { location.href = data.url; }
-    else { showMsg(msg, (data.message || '微信登录暂不可用，请用手机验证码'), 'err'); }
-  } catch (e) { showMsg(msg, '微信登录失败，请用手机验证码', 'err'); }
+    if (data && data.url) { location.href = data.url; }
+    else { showMsg(msg, (data && data.message) || '微信登录暂不可用，请使用手机验证码登录', 'err'); }
+  } catch (e) {
+    showMsg(msg, '微信登录失败，请使用手机验证码登录', 'err');
+  }
 }
 
-/**
- * 微信授权回跳处理：wx=cb&ticket=.. → 用一次性票据到后台换取登录结果。
- * 令牌与手机号不再出现在回跳 URL 中（避免浏览器历史 / 日志 / Referer 泄漏）。
- */
 async function handleWxCallback() {
   const q = new URLSearchParams(location.search);
-  if (q.get('wx') !== 'cb') return;
-  const msg = getOwnerMsg();
+  if (q.get('wx') !== 'cb') return false;
+  const msg = $('ownerMsg');
   const ticket = q.get('ticket');
-  // 立刻清掉地址栏参数，票据不留在历史记录里
   history.replaceState({}, '', location.origin + location.pathname);
-  if (q.get('err')) {
-    showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
-    return;
-  }
-  if (!ticket) {
-    showMsg(msg, '微信登录会话无效，请重新点击微信登录', 'err');
-    return;
-  }
+  if (q.get('err')) { showLogin(); showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err'); return true; }
+  if (!ticket) { showLogin(); showMsg(msg, '微信登录会话无效，请重新点击微信登录', 'err'); return true; }
   try {
     const data = await apiPost('/wx/exchange', { ticket: ticket });
     if (data && data.needBind) {
       window._wxOpenid = data.openid || '';
-      document.getElementById('wxFirstHint').classList.remove('hidden');
-      showMsg(msg, '请先完成业主手机号绑定（仅首次）', 'ok');
-      return;
+      showBindCard();
+      return true;
     }
     if (data && data.token) {
-      setOwnerInfo({
-        token: data.token, phone: data.phone || '',
-        name: data.name || '', houses: data.houses || [],
-      });
-      renderOwnerLogged(getOwnerInfo());
-      showMsg(msg, '✅ 微信登录成功，可进行缴费', 'ok');
-      return;
+      setOwnerInfo({ token: data.token, phone: data.phone || '', name: data.name || '' });
+      enterLogged(getOwnerInfo());
+      return true;
     }
-    showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
+    showLogin(); showMsg(msg, '微信登录未完成，请使用手机验证码登录', 'err');
   } catch (e) {
-    showMsg(msg, '微信登录失败，请用手机验证码', 'err');
+    showLogin(); showMsg(msg, '微信登录失败，请使用手机验证码登录', 'err');
+  }
+  return true;
+}
+
+/* ================= 首次微信绑定 ================= */
+async function wxBindByName() {
+  const oid = window._wxOpenid;
+  const msg = $('bindMsg');
+  if (!oid) { showMsg(msg, '绑定会话已失效，请重新点击微信登录', 'err'); return; }
+  const phone = $('bindPhone').value.replace(/\D/g, '');
+  const name = $('bindName').value.trim();
+  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
+  if (!name) { showMsg(msg, '请填写业主姓名', 'err'); return; }
+  try {
+    const data = await apiPost('/wx/bind', { openid: oid, phone: phone, name: name });
+    if (data && data.token) { onBindSuccess(data, phone); }
+    else { showMsg(msg, (data && data.message) || '业主姓名与登记信息不一致，请核对后重试', 'err'); showUseSmsLink(); }
+  } catch (e) {
+    showMsg(msg, e.message || '绑定失败，请核对信息后重试', 'err');
+    showUseSmsLink();
   }
 }
 
-/** 首次微信绑定：openid + 业主手机号 + 短信验证码。 */
-async function wxBindLogin() {
+/* 绑定兜底：手机号 + 短信验证码 */
+async function wxBindBySms() {
   const oid = window._wxOpenid;
-  const msg = getOwnerMsg();
+  const msg = $('bindMsg');
   if (!oid) { showMsg(msg, '绑定会话已失效，请重新点击微信登录', 'err'); return; }
-  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
-  const code = document.getElementById('ownerCode').value.trim();
-  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位业主手机号', 'err'); return; }
-  if (!code) { showMsg(msg, '请先获取并输入短信验证码', 'err'); return; }
+  const phone = $('bindPhone').value.replace(/\D/g, '');
+  const code = $('bindCode').value.trim();
+  if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
+  if (!/^\d{6}$/.test(code)) { showMsg(msg, '请输入 6 位短信验证码', 'err'); return; }
   try {
     const data = await apiPost('/wx/bind', { openid: oid, phone: phone, code: code });
-    if (data.token) {
-      setOwnerInfo({ token: data.token, phone: data.phone || phone, name: data.name || '' });
-      document.getElementById('wxFirstHint').classList.add('hidden');
-      window._wxOpenid = null;
-      renderOwnerLogged(getOwnerInfo());
-      showMsg(msg, '✅ 绑定成功！此后微信一键登录免验证码', 'ok');
-    } else {
-      showMsg(msg, (data.message || '绑定失败，请重试'), 'err');
-    }
-  } catch (e) { showMsg(msg, '绑定失败，请重试', 'err'); }
-}
-
-if (typeof window !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', handleWxCallback);
-  } else {
-    setTimeout(handleWxCallback, 300);
+    if (data && data.token) { onBindSuccess(data, phone); }
+    else { showMsg(msg, (data && data.message) || '绑定失败，请重试', 'err'); }
+  } catch (e) {
+    showMsg(msg, e.message || '绑定失败，请重试', 'err');
   }
 }
 
-async function sendOwnerCode() {
-  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
-  const msg = document.getElementById('ownerMsg');
-  const btn = document.getElementById('btnSendCode');
+function onBindSuccess(data, phone) {
+  setOwnerInfo({ token: data.token, phone: data.phone || phone, name: data.name || '' });
+  window._wxOpenid = '';
+  hide($('bindCard'));
+  enterLogged(getOwnerInfo());
+}
+
+/* ================= 短信验证码（登录 / 绑定复用） ================= */
+async function sendCode(btnId, phoneId, msgId) {
+  const phone = $(phoneId).value.replace(/\D/g, '');
+  const msg = $(msgId);
+  const btn = $(btnId);
   if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
+  if (btn.disabled) return;
   btn.disabled = true;
   try {
     const data = await apiPost('/auth/send-code', { phone: phone });
-    if (data.success || data.message) {
-      const tip = data.message ? data.message : '验证码已发送';
-      showMsg(msg, tip, 'ok');
-    } else {
-      showMsg(msg, data.message || '发送失败，请稍后再试', 'err');
-    }
+    showMsg(msg, (data && data.message) || '验证码已发送，请查收短信', 'ok');
   } catch (e) {
     showMsg(msg, e.message || '发送失败，请稍后再试', 'err');
     btn.disabled = false;
     return;
   }
-  // 60s 倒计时
   let left = 60;
   btn.textContent = left + 's 后重发';
-  codeCountdown = setInterval(() => {
+  const timer = setInterval(() => {
     left--;
-    if (left <= 0) {
-      clearInterval(codeCountdown);
-      btn.textContent = '获取验证码';
-      btn.disabled = false;
-    } else {
-      btn.textContent = left + 's 后重发';
-    }
+    if (left <= 0) { clearInterval(timer); btn.textContent = '获取验证码'; btn.disabled = false; }
+    else { btn.textContent = left + 's 后重发'; }
   }, 1000);
 }
+function sendOwnerCode() { sendCode('btnSendCode', 'ownerPhone', 'ownerMsg'); }
+function sendBindCode() { sendCode('btnBindSendCode', 'bindPhone', 'bindMsg'); }
 
+/* ================= 手机号 + 验证码登录 ================= */
 async function ownerLogin() {
-  const phone = document.getElementById('ownerPhone').value.replace(/\D/g, '');
-  const code = document.getElementById('ownerCode').value.trim();
-  const msg = document.getElementById('ownerMsg');
-  const btn = document.querySelector('#ownerLoginForm .btn-primary');
+  const phone = $('ownerPhone').value.replace(/\D/g, '');
+  const code = $('ownerCode').value.trim();
+  const msg = $('ownerMsg');
+  const btn = $('btnPhoneLogin');
   if (!/^1\d{10}$/.test(phone)) { showMsg(msg, '请输入正确的 11 位手机号', 'err'); return; }
   if (!/^\d{6}$/.test(code)) { showMsg(msg, '请输入 6 位短信验证码', 'err'); return; }
-  if (btn) { btn.disabled = true; btn.textContent = '验证中…'; }
+  btn.disabled = true; btn.textContent = '登录中…';
   try {
     const data = await apiPost('/auth/login', { phone: phone, code: code });
-    if (!data.token) { showMsg(msg, data.message || '登录失败，请重试', 'err'); return; }
-    setOwnerInfo({ token: data.token, phone: data.phone, name: '', houses: data.houses || [] });
-    // 若名下房屋都无业主姓名，尝试显示脱敏手机号即可
-    renderOwnerLogged(data);
-    showMsg(msg, '✅ 验证成功，已解锁缴费', 'ok');
-    if (pendingPay) {
-      pendingPay = false;
-      setTimeout(() => { const pbtn = document.getElementById('btnPay'); if (pbtn) pbtn.click(); }, 400);
-    }
+    if (!data || !data.token) { showMsg(msg, (data && data.message) || '登录失败，请重试', 'err'); return; }
+    setOwnerInfo({ token: data.token, phone: data.phone || phone, name: data.name || '' });
+    enterLogged(getOwnerInfo());
   } catch (e) {
     showMsg(msg, e.message || '登录失败，请重试', 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '验证并解锁缴费'; }
+    btn.disabled = false; btn.textContent = '登录';
   }
-}
-
-function renderOwnerLogged(data) {
-  const info = data || getOwnerInfo();
-  if (!info) return;
-  const current = currentFee ? currentFee.property : null;
-  let inList = false;
-  let ownerName = '';
-  if (info.houses && current) {
-    inList = info.houses.some(h => h.community === current.community && h.building === current.building && h.room === current.room);
-  }
-  if (info.houses && info.houses.length) {
-    // 在名下房屋中找当前房的业主名
-    if (current) {
-      const h = info.houses.find(x => x.community === current.community && x.building === current.building && x.room === current.room);
-      if (h && h.owners && h.owners.length) {
-        const me = h.owners.find(o => (o.phone || '').replace(/\D/g, '').indexOf((info.phone || '').slice(-4)) >= 0) || h.owners[0];
-        ownerName = me ? (me.name || '') : '';
-      }
-    }
-    if (!ownerName && info.houses[0].owners && info.houses[0].owners.length) {
-      ownerName = info.houses[0].owners[0].name || '';
-    }
-  }
-  const phoneMask = info.phone ? info.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') : '';
-  document.getElementById('ownerNameTxt').textContent = ownerName || '';
-  document.getElementById('ownerPhoneTxt').textContent = phoneMask;
-  const btnPay = document.getElementById('btnPay');
-  if (current && !inList && info.houses && info.houses.length) {
-    document.getElementById('ownerHouseTxt').textContent = '⚠ 当前房屋不在您名下，无法缴费';
-    if (btnPay) { btnPay.disabled = true; btnPay.textContent = '非您名下房屋，无法缴费'; }
-  } else {
-    document.getElementById('ownerHouseTxt').textContent = info.houses ? ('名下房屋 ' + info.houses.length + ' 套') : '';
-    if (btnPay) { btnPay.disabled = false; btnPay.textContent = '微信支付'; }
-  }
-  document.getElementById('ownerLogged').classList.remove('hidden');
-  document.getElementById('ownerLoginForm').style.display = 'none';
 }
 
 function logoutOwner() {
   setOwnerInfo(null);
-  document.getElementById('ownerLogged').classList.add('hidden');
-  document.getElementById('ownerLoginForm').style.display = '';
-  document.getElementById('ownerMsg').textContent = '';
-  document.getElementById('btnPay').disabled = false;
-  document.getElementById('btnPay').textContent = '微信支付';
-  pendingPay = false;
+  window._wxOpenid = '';
+  window._houses = [];
+  $('housesWrap').innerHTML = '';
+  $('ownerPhone').value = '';
+  $('ownerCode').value = '';
+  showMsg($('ownerMsg'), '', '');
+  showMsg($('housesMsg'), '', '');
+  showLogin();
 }
 
-async function payFee() {
-  if (!currentFee) return;
-  const btn = document.getElementById('btnPay');
-  const msg = document.getElementById('msgStep2');
-  const loading = document.getElementById('payLoading');
-  const p = currentFee.property;
-  const y = currentFee.year;
-  const sel = document.getElementById('selChannel');
-  const channels = window.currentChannels || [];
-  const name = sel.value;
-  const ch = channels.find(c => (c.channelName || c.channelType) === name);
-  const payType = ch ? ch.channelType : 'native';
-  const payChannel = ch ? (ch.channelName || ch.channelType) : null;
+/* ================= 我名下的房屋 ================= */
+async function loadHouses() {
+  const info = getOwnerInfo();
+  if (!info || !info.token) { showLogin(); return; }
+  const wrap = $('housesWrap');
+  const msg = $('housesMsg');
+  show(wrap); show($('housesLoading')); showMsg(msg, '', '');
+  try {
+    const data = await apiPost('/owner/houses', {}, { 'X-Owner-Token': info.token });
+    if (data && (data.name || data.phone)) {
+      info.name = data.name || info.name || '';
+      info.phone = data.phone || info.phone || '';
+      setOwnerInfo(info);
+      renderUserBar(info);
+    }
+    renderHouses(data || {});
+  } catch (e) {
+    const m = e.message || '';
+    if (/登录|失效|令牌|凭证|身份/.test(m)) {
+      setOwnerInfo(null);
+      showLogin();
+      showMsg($('ownerMsg'), m || '登录已失效，请重新登录', 'err');
+    } else {
+      showMsg(msg, '加载名下房屋失败：' + m, 'err');
+    }
+  } finally {
+    hide($('housesLoading'));
+  }
+}
 
-  // ---- V4 业主守卫：未验证业主身份先引导登录 ----
-  const ownerInfo = getOwnerInfo();
-  if (!ownerInfo || !ownerInfo.token) {
-    showMsg(msg, '请先完成上方「业主验证」后再缴费（仅限本房屋登记业主）', 'err');
-    document.getElementById('ownerBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    pendingPay = true;
-    btn.disabled = false;
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s);
+  const p = n => (n < 10 ? '0' + n : '' + n);
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function fmtMoney(v) {
+  const n = Number(v);
+  return '¥' + (isFinite(n) ? n.toFixed(2) : '0.00');
+}
+function isPaid(y) { return String((y && y.status) || '').toUpperCase() === 'PAID'; }
+
+function renderHouses(data) {
+  const houses = data.houses || [];
+  window._houses = houses;
+  const wrap = $('housesWrap');
+  if (!houses.length) {
+    wrap.innerHTML = '<div class="card"><div class="empty">未查询到您名下的房屋。如信息有误，请联系物业核对业主档案。</div></div>';
     return;
   }
+  let html = '';
+  houses.forEach((h, idx) => {
+    const years = (h.years || []).slice().sort((a, b) => (b.year || 0) - (a.year || 0));
+    const addr = (h.building || '') + (h.unit || '') + (h.room || '');
+    const title = ((h.community || '') + ' ' + addr).trim();
+    const ownerName = h.ownerName || (h.owners && h.owners[0] && h.owners[0].name) || '';
+    const sub = [];
+    if (h.area != null && h.area !== '') sub.push(h.area + ' ㎡');
+    if (h.propertyType) sub.push(h.propertyType);
+    if (ownerName) sub.push('业主 ' + ownerName);
 
-  btn.disabled = true;
-  loading.classList.add('show');
+    let rows = '';
+    let unpaid = 0;
+    if (!years.length) {
+      rows = '<div class="empty-sm">暂无年度账单信息，请联系物业</div>';
+    } else {
+      years.forEach(y => {
+        const amt = Number(y.amount || 0);
+        const paid = isPaid(y);
+        if (!paid) unpaid += amt;
+        rows += '<div class="year-row">'
+          + '<div class="y-left"><span class="y-year">' + y.year + ' 年</span>'
+          + '<span class="badge ' + (paid ? 'badge-paid' : 'badge-unpaid') + '">' + (paid ? '✅ 已缴' : '待缴') + '</span></div>'
+          + '<div class="y-right"><span class="y-amt">' + fmtMoney(amt) + '</span>'
+          + (paid
+              ? '<span class="y-date">' + (fmtDate(y.paidAt) || '已缴') + '</span>'
+              : '<button class="pay-btn" data-idx="' + idx + '" data-year="' + y.year + '" onclick="payYear(' + idx + ', ' + y.year + ')">立即缴费</button>')
+          + '</div></div>';
+      });
+    }
+    const total = (h.unpaidTotal != null) ? Number(h.unpaidTotal) : unpaid;
+    html += '<div class="card house-card">'
+      + '<div class="house-head"><div class="house-title">' + title + '</div>'
+      + (sub.length ? '<div class="house-sub">' + sub.join(' · ') + '</div>' : '')
+      + '</div>' + rows
+      + '<div class="house-total">待缴合计 <b>' + fmtMoney(total) + '</b></div>'
+      + '</div>';
+  });
+  wrap.innerHTML = html;
+}
+
+/* ================= 缴费 ================= */
+async function payYear(idx, year) {
+  const info = getOwnerInfo();
+  if (!info || !info.token) { showLogin(); return; }
+  const h = (window._houses || [])[idx];
+  if (!h) return;
+  const msg = $('housesMsg');
+  const loading = $('payLoading');
+  const wx = inWechat();
+  const payType = wx ? 'wechat_jsapi' : 'wechat_native';
+  const payChannel = wx ? '公众号支付' : 'wechat_native';
+  const params = {
+    community: h.community, building: h.building, room: h.room,
+    year: year, payType: payType, payChannel: payChannel,
+    openid: window._wxOpenid || ''
+  };
+  let keepDisabled = false;
   showMsg(msg, '', '');
+  show(loading);
+  const btn = document.querySelector('button.pay-btn[data-idx="' + idx + '"][data-year="' + year + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '处理中…'; }
   try {
-    // 双通道：body + URL query（Halo 2.26 对部分 JSON body 解析有竞态，query 兜底保证下单成功）
-    const qs = new URLSearchParams({
-      community: p.community, building: p.building, room: p.room, year: y,
-      payType: payType, payChannel: payChannel || ''
-    });
-    const data = await apiPost('/feerecords/pay?' + qs.toString(), {
-      community: p.community, building: p.building, room: p.room, year: y,
-      payType: payType, payChannel: payChannel
-    }, { 'X-Owner-Token': getOwnerInfo().token });
-    if (data.status === 'PAID' && payType === 'offline') {
-      // 线下登记成功
-      showMsg(msg, data.message || '线下收款已登记，缴费完成', 'ok');
-      setTimeout(() => location.reload(), 1500);
+    // body + query 双通道：Halo 对部分 JSON body 存在解析竞态，query 兜底
+    const qs = new URLSearchParams();
+    Object.keys(params).forEach(k => qs.set(k, params[k] == null ? '' : params[k]));
+    const data = await apiPost('/feerecords/pay?' + qs.toString(), params, { 'X-Owner-Token': info.token });
+
+    if (data && data.status === 'PENDING_CONFIRM') {
+      showMsg(msg, data.message || '线下缴费申请已提交，物业核实到账后确认入账', 'ok');
       return;
     }
-    // 跳转支付（Native/JSAPI 由后端根据场景返回）
-    if (data.payUrl) {
-      window.location.href = data.payUrl;
-    } else if (data.jsapiParams) {
-      // JSAPI 场景（微信内）
+    if (data && data.jsapiParams) {
+      keepDisabled = true;
       if (typeof WeixinJSBridge !== 'undefined') {
         WeixinJSBridge.invoke('getBrandWCPayRequest', data.jsapiParams, res => {
           if (res.err_msg === 'get_brand_wcpay_request:ok') {
-            showMsg(msg, '支付成功！', 'ok');
-            setTimeout(() => location.reload(), 1500);
+            showMsg(msg, '支付成功！正在刷新缴费状态…', 'ok');
+            setTimeout(refreshAfterPay, 1200);
           } else {
             showMsg(msg, '支付未完成：' + (res.err_msg || ''), 'err');
-            btn.disabled = false;
+            if (btn) { btn.disabled = false; btn.textContent = '立即缴费'; }
           }
         });
       } else {
-        showMsg(msg, '请在微信内打开进行支付', 'info');
-        btn.disabled = false;
+        showMsg(msg, '请在微信中打开本页完成支付', 'info');
+        keepDisabled = false;
       }
-    } else if (data.codeUrl) {
-      // Native 扫码场景：弹出二维码
+      return;
+    }
+    if (data && data.codeUrl) {
+      keepDisabled = true;
       showQrModal(data.codeUrl, data.totalAmount, data.outTradeNo);
-      btn.disabled = false;
-    } else {
+      return;
+    }
+    if (data && data.payUrl) { window.location.href = data.payUrl; return; }
+    if (data && data.outTradeNo) {
       showMsg(msg, '下单成功，请在微信中完成支付', 'info');
       setTimeout(() => checkStatus(data.outTradeNo), 3000);
+      return;
     }
+    showMsg(msg, '下单成功，请按提示完成支付', 'info');
   } catch (e) {
-    showMsg(msg, e.message, 'err');
+    showMsg(msg, e.message || '下单失败，请重试', 'err');
   } finally {
-    loading.classList.remove('show');
+    hide(loading);
+    if (btn && !keepDisabled) { btn.disabled = false; btn.textContent = '立即缴费'; }
   }
 }
 
-/* ============ Native 二维码弹窗 ============ */
+function refreshAfterPay() {
+  const info = getOwnerInfo();
+  if (info && info.token) { loadHouses(); }
+  else { location.reload(); }
+}
+
+/* ================= Native 二维码弹窗 ================= */
 let qrTimer = null;
 function showQrModal(codeUrl, amount, outTradeNo) {
-  const modal = document.getElementById('qrModal');
-  const box = document.getElementById('qrBox');
+  const modal = $('qrModal');
+  const box = $('qrBox');
+  const qrStatus = $('qrStatus');
   box.innerHTML = '';
-  // 生成二维码（用 qrcodejs 或 qrcode 库）
   if (typeof QRCode !== 'undefined') {
     new QRCode(box, { text: codeUrl, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
   } else if (typeof qrcode !== 'undefined') {
@@ -872,48 +757,58 @@ function showQrModal(codeUrl, amount, outTradeNo) {
       }
     });
   } else {
-    // 兜底：显示支付链接文本
     box.innerHTML = '<div style="font-size:12px;word-break:break-all;color:#666">' + codeUrl + '</div>';
   }
   const amt = Number(amount || 0);
-  document.getElementById('qrAmount').textContent = '¥' + (isFinite(amt) ? amt.toFixed(2) : amount);
-  modal.classList.remove('hidden');
-  // 轮询支付状态
+  $('qrAmount').textContent = '¥' + (isFinite(amt) ? amt.toFixed(2) : amount);
+  qrStatus.textContent = '请使用微信扫一扫完成支付';
+  qrStatus.className = 'qr-status';
+  show(modal);
   clearInterval(qrTimer);
   qrTimer = setInterval(async () => {
     try {
       const st = await apiGet('/feerecords/' + outTradeNo + '/status');
       if (st.status === 'PAID' || st.paid) {
         clearInterval(qrTimer);
-        document.getElementById('qrStatus').textContent = '✅ 支付成功！';
-        document.getElementById('qrStatus').className = 'qr-status ok';
-        setTimeout(() => { closeQrModal(); location.reload(); }, 1500);
+        qrStatus.textContent = '✅ 支付成功！';
+        qrStatus.className = 'qr-status ok';
+        setTimeout(() => { closeQrModal(); refreshAfterPay(); }, 1500);
       }
     } catch (e) { /* ignore */ }
   }, 3000);
-  document.getElementById('qrStatus').textContent = '请使用微信扫一扫完成支付';
-  document.getElementById('qrStatus').className = 'qr-status';
 }
 
 function closeQrModal() {
-  document.getElementById('qrModal').classList.add('hidden');
+  hide($('qrModal'));
   clearInterval(qrTimer);
 }
 
 async function checkStatus(outTradeNo) {
   try {
     const data = await apiGet('/feerecords/' + outTradeNo + '/status');
-    if (data.paid) {
-      showMsg(document.getElementById('msgStep2'), '支付成功！', 'ok');
-      setTimeout(() => location.reload(), 1500);
+    if (data.paid || data.status === 'PAID') {
+      showMsg($('housesMsg'), '支付成功！正在刷新缴费状态…', 'ok');
+      setTimeout(refreshAfterPay, 1200);
     } else {
-      showMsg(document.getElementById('msgStep2'), '支付结果确认中，请稍后刷新页面查看', 'info');
+      showMsg($('housesMsg'), '支付结果确认中，请稍后刷新页面查看', 'info');
     }
   } catch (e) { /* ignore */ }
 }
 
-initYears();
-loadOptions();
+/* ================= 启动 ================= */
+(function () {
+  async function boot() {
+    let handled = false;
+    try { handled = await handleWxCallback(); } catch (e) { handled = false; }
+    if (handled) return;
+    const info = getOwnerInfo();
+    if (info && info.token) enterLogged(info);
+    else showLogin();
+  }
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', boot); }
+  else { boot(); }
+})();
+
 </script>
 <script src="/user-nav.js?v=20260907b"></script><script src="/wx-share.js?v=20260904"></script><script src="/wb-menu-inject.js?v=20260906"></script></body>
 </html>

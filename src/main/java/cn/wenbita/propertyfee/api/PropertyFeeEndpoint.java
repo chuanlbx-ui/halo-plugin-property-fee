@@ -292,6 +292,25 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
 
     /** 计算应缴（含已缴检查）。支持：周期换算、优惠减免、物业类型。 */
     private Mono<FeeCalc> calcFeeAmount(Property property, FeeStandard standard) {
+        FeeCalc calc = syncCalc(property, standard);
+        int year = standard.getSpec().getYear();
+        return client.listAll(FeeRecord.class, ListOptions.builder().build(),
+                org.springframework.data.domain.Sort.unsorted())
+            .filter(r -> r.getSpec() != null
+                && "PAID".equals(r.getSpec().getStatus())
+                && Integer.valueOf(year).equals(r.getSpec().getYear())
+                && property.getMetadata().getName().equals(r.getSpec().getPropertyName()))
+            .next()
+            .map(rec -> {
+                calc.paid = true;
+                calc.paidAt = rec.getSpec().getPaidAt();
+                return calc;
+            })
+            .defaultIfEmpty(calc);
+    }
+
+    /** 纯计算（不查已缴）：面积×单价×月数 + 附加费 − 优惠。 */
+    private FeeCalc syncCalc(Property property, FeeStandard standard) {
         FeeCalc calc = new FeeCalc();
         var ps = property.getSpec();
         var ss = standard.getSpec();
@@ -337,20 +356,7 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             }
         }
         calc.totalAmount = subtotal - calc.discountAmount;
-        int year = ss.getYear();
-        return client.listAll(FeeRecord.class, ListOptions.builder().build(),
-                org.springframework.data.domain.Sort.unsorted())
-            .filter(r -> r.getSpec() != null
-                && "PAID".equals(r.getSpec().getStatus())
-                && Integer.valueOf(year).equals(r.getSpec().getYear())
-                && property.getMetadata().getName().equals(r.getSpec().getPropertyName()))
-            .next()
-            .map(rec -> {
-                calc.paid = true;
-                calc.paidAt = rec.getSpec().getPaidAt();
-                return calc;
-            })
-            .defaultIfEmpty(calc);
+        return calc;
     }
 
     /** 缴费周期 → 月数。 */
@@ -530,9 +536,10 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
             // 未配置通知地址时动态推导当前站点（迁移部署无需改代码）
             notifyUrl = siteBase + "/apis/api.propertyfee.halo.run/v1alpha1/feerecords/notify";
         }
-        if ("jsapi".equals(req.payType())) {
+        String payType = req.payType() == null ? "" : req.payType().toLowerCase();
+        if (payType.contains("jsapi")) {
             if (req.openid() == null || req.openid().isBlank()) {
-                return Mono.error(new PropertyFeeException("微信内支付缺少openid，请重新进入"));
+                return Mono.error(new PropertyFeeException("微信内支付缺少openid，请重新点击微信登录后再试"));
             }
             return wechatPayService.createJsapiOrder(pc, description, outTradeNo, totalFen,
                     notifyUrl, req.openid())
@@ -540,10 +547,10 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     Map<String, Object> result = new java.util.HashMap<>();
                     result.put("outTradeNo", outTradeNo);
                     result.put("totalAmount", round2(calc.totalAmount));
-                    result.put("prepayId", wx.get("prepay_id"));
-                    result.put("appId", pc.getSpec().getAppId());
-                    result.put("mchId", pc.getSpec().getMchId());
                     result.put("payType", "jsapi");
+                    // 微信内支付：前端用 jsapiParams 调起 WeixinJSBridge 付款
+                    result.put("jsapiParams",
+                        wechatPayService.buildJsapiParams(pc, strOf(wx.get("prepay_id"))));
                     return result;
                 });
         }
@@ -834,26 +841,146 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
         }
         String norm = PropertyHelper.normalizePhone(phone);
         return listAll(Property.class).flatMap(all -> {
-            List<Map<String, Object>> houses = new ArrayList<>();
+            List<Property> mine = new ArrayList<>();
             for (Property p : all) {
                 if (PropertyHelper.isOwnerPhone(p, norm)) {
-                    var s = p.getSpec();
-                    Map<String, Object> h = new java.util.HashMap<>();
-                    if (s != null) {
+                    mine.add(p);
+                }
+            }
+            return listAll(FeeStandard.class).flatMap(standards ->
+                listAll(FeeRecord.class).flatMap(records -> {
+                    List<Map<String, Object>> houses = new ArrayList<>();
+                    String ownerName = null;
+                    for (Property p : mine) {
+                        var s = p.getSpec();
+                        if (s == null) {
+                            continue;
+                        }
+                        Map<String, Object> h = new java.util.HashMap<>();
+                        h.put("propertyName", p.getMetadata().getName());
                         h.put("community", s.getCommunity());
                         h.put("building", s.getBuilding());
+                        h.put("unit", s.getUnit());
                         h.put("room", s.getRoom());
                         h.put("propertyType", s.getPropertyType());
                         h.put("area", s.getArea());
                         h.put("ownerName", s.getOwnerName());
                         h.put("owners", ownerSummaries(p));
+                        if (ownerName == null && s.getOwnerName() != null) {
+                            ownerName = s.getOwnerName();
+                        }
+                        // 该小区已配置收费标准的年份（倒序）
+                        List<FeeStandard> stds = standards.stream()
+                            .filter(fs -> fs.getSpec() != null && fs.getSpec().getYear() != null
+                                && s.getCommunity() != null
+                                && s.getCommunity().equals(fs.getSpec().getCommunity())
+                                && !Boolean.FALSE.equals(fs.getSpec().getEnabled()))
+                            .sorted((a, b) -> b.getSpec().getYear() - a.getSpec().getYear())
+                            .toList();
+                        List<Map<String, Object>> years = new ArrayList<>();
+                        double unpaidTotal = 0;
+                        java.util.Set<Integer> seenYears = new java.util.LinkedHashSet<>();
+                        for (FeeStandard fs : stds) {
+                            int y = fs.getSpec().getYear();
+                            if (!seenYears.add(y)) {
+                                continue;
+                            }
+                            FeeCalc calc = syncCalc(p, fs);
+                            FeeRecord rec = records.stream()
+                                .filter(r -> r.getSpec() != null
+                                    && Integer.valueOf(y).equals(r.getSpec().getYear())
+                                    && p.getMetadata().getName().equals(r.getSpec().getPropertyName())
+                                    && !"REJECTED".equals(r.getSpec().getStatus()))
+                                .sorted((a, b) -> {
+                                    boolean pa = "PAID".equals(a.getSpec().getStatus());
+                                    boolean pb = "PAID".equals(b.getSpec().getStatus());
+                                    if (pa != pb) {
+                                        return pa ? -1 : 1;
+                                    }
+                                    String ca = a.getMetadata().getCreationTimestamp() == null ? ""
+                                        : a.getMetadata().getCreationTimestamp().toString();
+                                    String cb = b.getMetadata().getCreationTimestamp() == null ? ""
+                                        : b.getMetadata().getCreationTimestamp().toString();
+                                    return cb.compareTo(ca);
+                                })
+                                .findFirst().orElse(null);
+                            String status = rec == null || rec.getSpec().getStatus() == null
+                                ? "UNPAID" : rec.getSpec().getStatus();
+                            Map<String, Object> ym = new java.util.HashMap<>();
+                            ym.put("year", y);
+                            ym.put("amount", round2(calc.totalAmount));
+                            ym.put("status", status);
+                            ym.put("paidAt", rec == null || rec.getSpec().getPaidAt() == null
+                                ? null : rec.getSpec().getPaidAt().toString());
+                            ym.put("outTradeNo", rec == null ? null : rec.getSpec().getOutTradeNo());
+                            ym.put("recordName", rec == null ? null : rec.getMetadata().getName());
+                            if (!"PAID".equals(status)) {
+                                unpaidTotal += calc.totalAmount;
+                            }
+                            years.add(ym);
+                        }
+                        h.put("years", years);
+                        h.put("unpaidTotal", round2(unpaidTotal));
+                        h.put("unitPriceTip", stds.isEmpty() ? null : stds.get(0).getSpec().getUnitPrice());
+                        houses.add(h);
                     }
-                    houses.add(h);
-                }
+                    Map<String, Object> resp = new java.util.HashMap<>();
+                    resp.put("phone", norm);
+                    resp.put("name", ownerName);
+                    resp.put("houses", houses);
+                    resp.put("houseCount", houses.size());
+                    return ServerResponse.ok().bodyValue(resp);
+                }));
+        });
+    }
+
+    /** 免验证码绑定：手机号+业主姓名与物业档案比对（姓名忽略空格）。 */
+    private static boolean ownerNameMatches(Property p, String phone, String name) {
+        if (p == null || p.getSpec() == null || !hasText(name) || !hasText(phone)) {
+            return false;
+        }
+        String target = name.replaceAll("\\s", "");
+        for (Property.Owner o : PropertyHelper.effectiveOwners(p.getSpec())) {
+            if (o == null || !phone.equals(PropertyHelper.normalizePhone(o.getPhone()))) {
+                continue;
             }
-            return ServerResponse.ok().bodyValue(Map.of(
-                "phone", norm, "houses", houses, "houseCount", houses.size()));
-        }).onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+            String on = o.getName() == null ? "" : o.getName().replaceAll("\\s", "");
+            if (!on.isEmpty() && on.equals(target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 免验证码比对失败计数（防爆破）：key=手机号，连续失败≥5 次锁 10 分钟。 */
+    private final Map<String, int[]> bindFailures = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private boolean isBindLocked(String phone) {
+        int[] st = bindFailures.get(phone);
+        if (st == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - st[1] > 600_000L) {
+            bindFailures.remove(phone);
+            return false;
+        }
+        return st[0] >= 5;
+    }
+
+    private void recordBindFailure(String phone) {
+        bindFailures.compute(phone, (k, st) -> {
+            long now = System.currentTimeMillis();
+            if (st == null || now - st[1] > 600_000L) {
+                return new int[]{1, (int) (now / 1000)};
+            }
+            st[0]++;
+            st[1] = (int) (now / 1000);
+            return st;
+        });
+    }
+
+    private void clearBindFailure(String phone) {
+        bindFailures.remove(phone);
     }
 
     /** 业主列表摘要（脱敏手机号用于展示，如 138****8000）。 */
@@ -1213,10 +1340,18 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 String openid = m.get("openid") == null ? null : String.valueOf(m.get("openid"));
                 String phoneRaw = m.get("phone") == null ? null : String.valueOf(m.get("phone"));
                 String code = m.get("code") == null ? null : String.valueOf(m.get("code"));
-                if (!hasText(openid) || !hasText(phoneRaw) || !hasText(code)) {
-                    return Mono.error(new PropertyFeeException("openid/手机号/验证码不能为空"));
+                String nameRaw = m.get("name") == null ? null : String.valueOf(m.get("name")).trim();
+                if (!hasText(openid) || !hasText(phoneRaw)) {
+                    return Mono.error(new PropertyFeeException("openid/手机号不能为空"));
+                }
+                if (!hasText(code) && !hasText(nameRaw)) {
+                    return Mono.error(new PropertyFeeException("请填写业主姓名，或改用短信验证码"));
                 }
                 String phone = PropertyHelper.normalizePhone(phoneRaw);
+                // 免验证码通道防爆破：同一手机号连续比对失败 5 次锁定 10 分钟
+                if (!hasText(code) && isBindLocked(phone)) {
+                    return Mono.error(new PropertyFeeException("核对失败次数过多，请 10 分钟后再试或改用短信验证码"));
+                }
                 // 校验业主 + 验证码（先确认手机号是登记业主）
                 return listAll(Property.class).flatMap(all -> {
                     boolean isOwner = all.stream().anyMatch(p ->
@@ -1225,8 +1360,21 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                         return Mono.error(new PropertyFeeException(
                             "该手机号未登记为业主，请联系物业核对业主档案"));
                     }
-                    // 校验短信验证码（与手机登录同一套码；微信绑定前须先走 auth/send-code 发码）
-                    String token = ownerAuthService.login(phone, code);
+                    String token;
+                    if (hasText(code)) {
+                        // 通道一：短信验证码（与手机登录同一套码；须先走 auth/send-code 发码）
+                        token = ownerAuthService.login(phone, code);
+                    } else {
+                        // 通道二（免验证码）：手机号 + 业主姓名与物业档案比对一致
+                        boolean nameMatch = all.stream().anyMatch(p -> ownerNameMatches(p, phone, nameRaw));
+                        if (!nameMatch) {
+                            recordBindFailure(phone);
+                            return Mono.error(new PropertyFeeException(
+                                "业主姓名与登记信息不一致，请核对后重试，或改用短信验证码"));
+                        }
+                        clearBindFailure(phone);
+                        token = ownerAuthService.issueTokenByPhone(phone);
+                    }
                     // 绑定 openid 到所有含该手机号的房屋
                     boolean bound = false;
                     for (Property p : all) {

@@ -7,6 +7,7 @@ import static org.springdoc.core.fn.builders.requestbody.Builder.requestBodyBuil
 import static org.springdoc.core.fn.builders.schema.Builder.schemaBuilder;
 
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import cn.wenbita.propertyfee.ImportService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -55,6 +56,9 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
 
     /** 服务端密钥库：敏感配置以密文落库、接口不回传明文。 */
     private final SecretStore secretStore;
+
+    /** 批量导入（房屋/业主/收费标准）。 */
+    private final ImportService importService;
 
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
@@ -141,6 +145,11 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
                 .operationId("DeletePaymentConfig").description("Delete payment config.").tag(tag)
                 .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
                     .implementation(String.class)))
+            // ===== 批量导入（房屋/业主/收费标准） =====
+            .POST("houses/import", this::importHouses, builder -> builder
+                .operationId("ImportHouses").description("Import communities/houses/owners/standards from xlsx or csv.")
+                .tag(tag)
+                .response(responseBuilder().implementation(Map.class)))
             // ===== 系统配置（短信/微信：复用平台既有配置，后台可维护） =====
             .GET("systemconfig", this::getSystemConfig, builder -> builder
                 .operationId("GetSystemConfig").description("Get platform system config (sms/wx).").tag(tag))
@@ -506,6 +515,70 @@ public class PropertyFeeConsoleEndpoint implements CustomEndpoint {
             .flatMap(pc -> client.delete(pc))
             .then(ServerResponse.noContent().build())
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 批量导入：multipart/form-data 字段名 file（query dryRun=false 才真正入库，默认预检）。 */
+    private Mono<ServerResponse> importHouses(ServerRequest request) {
+        boolean dryRun = !"false".equalsIgnoreCase(request.queryParam("dryRun").orElse("true"));
+        MediaType ct = request.headers().contentType().orElse(MediaType.APPLICATION_JSON);
+        if (ct.isCompatibleWith(MediaType.MULTIPART_FORM_DATA)) {
+            return request.multipartData()
+                .flatMap(parts -> {
+                    var part = parts.getFirst("file");
+                    if (part == null) {
+                        return Mono.error(new PropertyFeeException("未收到上传文件（表单字段名应为 file）"));
+                    }
+                    String filename = part.headers().getContentDisposition().getFilename();
+                    return org.springframework.core.io.buffer.DataBufferUtils.join(part.content())
+                        .flatMap(buf -> {
+                            byte[] bytes = new byte[buf.readableByteCount()];
+                            buf.read(bytes);
+                            org.springframework.core.io.buffer.DataBufferUtils.release(buf);
+                            return importService.importData(bytes, filename, dryRun);
+                        })
+                        .flatMap(r -> ServerResponse.ok().bodyValue(importSummary(r, dryRun)));
+                })
+                .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+        }
+        // JSON 兜底：{filename, dataBase64, dryRun}
+        return parseBody(request, Map.class)
+            .flatMap(m -> {
+                String b64 = m.get("dataBase64") == null ? null : String.valueOf(m.get("dataBase64"));
+                if (b64 == null || b64.isBlank()) {
+                    return Mono.error(new PropertyFeeException("请选择要导入的文件"));
+                }
+                int comma = b64.indexOf(',');
+                if (b64.startsWith("data:") && comma > 0) {
+                    b64 = b64.substring(comma + 1);
+                }
+                byte[] bytes;
+                try {
+                    bytes = java.util.Base64.getDecoder().decode(b64.replaceAll("\\s", ""));
+                } catch (Exception e) {
+                    return Mono.error(new PropertyFeeException("文件内容无法识别，请重新选择文件"));
+                }
+                boolean dr = m.get("dryRun") == null
+                    ? dryRun : !"false".equalsIgnoreCase(String.valueOf(m.get("dryRun")));
+                String fn = m.get("filename") == null ? "import.csv" : String.valueOf(m.get("filename"));
+                return importService.importData(bytes, fn, dr)
+                    .flatMap(r -> ServerResponse.ok().bodyValue(importSummary(r, dr)));
+            })
+            .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    private static Map<String, Object> importSummary(ImportService.ImportResult r, boolean dryRun) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("success", true);
+        m.put("dryRun", dryRun);
+        m.put("rows", r.rows());
+        m.put("communities", r.communities());
+        m.put("housesCreated", r.housesCreated());
+        m.put("housesUpdated", r.housesUpdated());
+        m.put("ownersAdded", r.ownersAdded());
+        m.put("standardsCreated", r.standardsCreated());
+        m.put("standardsUpdated", r.standardsUpdated());
+        m.put("errors", r.errors());
+        return m;
     }
 
     // ============ 缴费记录 ============

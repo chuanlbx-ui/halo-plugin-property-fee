@@ -6,6 +6,7 @@ import CommunityList from './views/CommunityList.vue'
 import StandardList from './views/StandardList.vue'
 import PaymentConfigList from './views/PaymentConfigList.vue'
 import ReportView from './views/ReportView.vue'
+import ImportView from './views/ImportView.vue'
 import SystemConfigView from './views/SystemConfigView.vue'
 import { IconPlug } from '@halo-dev/components'
 
@@ -63,6 +64,18 @@ export default definePlugin({
         component: PropertyList,
         meta: {
           title: '房屋管理',
+          searchable: true,
+        },
+      },
+    },
+    {
+      parentName: 'Root',
+      route: {
+        path: '/property-fee/import',
+        name: 'PropertyFeeImport',
+        component: ImportView,
+        meta: {
+          title: '批量导入',
           searchable: true,
         },
       },
