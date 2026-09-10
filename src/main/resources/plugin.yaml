@@ -17,7 +17,7 @@ spec:
   repo: https://github.com/chuanlbx-ui/halo-plugin-property-fee
   issues: https://github.com/chuanlbx-ui/halo-plugin-property-fee/issues
   displayName: "物业费收缴管理"
-  description: "物业费收缴管理插件：房屋资料Excel导入、按小区/楼栋/房号查费、多商户号微信支付、缴费报表与收缴率看板。适合物业公司/业委会线上收缴物业费。"
+  description: "物业费收缴管理插件：业主登录后直接查看名下房屋各年度缴费情况并在线缴费（微信内直接拉起付款），房屋/业主/收费标准一张表批量导入，多商户号微信支付、线下到账确认、缴费报表与收缴率看板。适合物业公司/业委会线上收缴物业费。"
   license:
     - name: "GPL-3.0"
       url: "https://github.com/chuanlbx-ui/halo-plugin-property-fee/blob/master/LICENSE"
