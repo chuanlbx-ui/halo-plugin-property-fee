@@ -593,9 +593,16 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                 .flatMap(configs -> wechatPayService.verifyNotifySignature(
                     configs, timestamp, nonce, signature, serial, body))
                 .flatMap(pc -> processNotify(pc, body)))
-            .flatMap(result -> ServerResponse.ok().bodyValue(result))
-            .onErrorResume(e -> ServerResponse.ok().bodyValue(Map.of("code", "FAIL",
-                "message", e.getMessage() == null ? "error" : e.getMessage())));
+            .flatMap(result -> ServerResponse.ok()
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue(result))
+            // 失败必须返回非 2xx：微信支付以 HTTP 状态码判定投递结果，
+            // 返回 200 会被视为「已成功接收」而不再重试，导致丢单。
+            .onErrorResume(e -> ServerResponse
+                .status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("code", "FAIL",
+                    "message", e.getMessage() == null ? "error" : e.getMessage())));
     }
 
     /** 原样读取请求体（验签必须使用未经改动的原始报文）。 */
