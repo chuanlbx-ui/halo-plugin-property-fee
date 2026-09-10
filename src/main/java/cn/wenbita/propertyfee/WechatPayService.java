@@ -459,6 +459,7 @@ public class WechatPayService {
 
         // 模式一：微信支付公钥（新版商户）；回调头 Wechatpay-Serial 形如 PUB_KEY_ID_xxxx
         if (targetSerial.startsWith("PUB_KEY_ID_")) {
+            final boolean[] keyConfigured = {false};
             return reactor.core.publisher.Flux.fromIterable(configs)
                 .filter(pc -> pc.getSpec() != null && pc.getSpec().getMchId() != null)
                 .filter(pc -> {
@@ -467,12 +468,16 @@ public class WechatPayService {
                 })
                 .concatMap(pc -> {
                     java.security.PublicKey pub = parsePublicKey(wxPayPublicKeyOf(pc));
-                    return pub != null && verifySignature(pub, message, signature)
-                        ? Mono.just(pc) : Mono.empty();
+                    if (pub == null) {
+                        return Mono.empty();
+                    }
+                    keyConfigured[0] = true;
+                    return verifySignature(pub, message, signature) ? Mono.just(pc) : Mono.empty();
                 })
                 .next()
-                .switchIfEmpty(Mono.error(new PropertyFeeException(
-                    "回调验签失败：请在商户配置中填写「微信支付公钥」及其公钥 ID（微信支付公钥模式）")));
+                .switchIfEmpty(Mono.defer(() -> Mono.error(new PropertyFeeException(keyConfigured[0]
+                    ? "回调验签失败：签名校验不通过，拒绝处理（报文可能被篡改或非微信支付发出）"
+                    : "回调验签失败：未配置「微信支付公钥」或公钥 ID 与回调不匹配（请在商户配置中填写）"))));
         }
 
         // 模式二：平台证书（老版商户，platformCert 从 /v3/certificates 拉取）
