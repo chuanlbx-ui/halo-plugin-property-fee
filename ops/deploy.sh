@@ -16,6 +16,13 @@ JAR="${1:-$(ls -t build/libs/property-fee-*.jar 2>/dev/null | head -1)}"
 VERSION=$(basename "${JAR:-none}" | sed -E 's/property-fee-(.*)\.jar/\1/')
 
 echo "=== 升级 ${VERSION} ==="
+if [ "${PF_SKIP_BUILD:-0}" != "1" ]; then
+  echo "--- 构建（防止部署旧包；跳过请设 PF_SKIP_BUILD=1）---"
+  ./gradlew build -x test --console=plain 2>&1 | grep -E "BUILD|error" | head -5
+  JAR="build/libs/property-fee-${VERSION}.jar"
+  [ -f "$JAR" ] || { echo "⛔ 构建产物不存在：$JAR"; exit 1; }
+fi
+
 bash ops/preflight.sh "$JAR" || { echo "⛔ 自检未通过，已中止（未做任何改动）"; exit 1; }
 
 echo

@@ -40,6 +40,11 @@ N_CSS=$(unzip -p "$JAR" console/main.js 2>/dev/null | grep -c "data-property-fee
 chk "5. 前台页面已打包"
 unzip -l "$JAR" 2>/dev/null | grep -q "frontend/property-fee.html" && ok "✓" || bad "缺 frontend/property-fee.html"
 
+chk "5b. jar 是否比源码新（防部署旧包）"
+NEWEST_SRC=$(find src -type f \( -name "*.java" -o -name "*.vue" -o -name "*.ts" -o -name "*.yaml" -o -name "*.html" -o -name "*.css" \) -newer "$JAR" 2>/dev/null | head -3)
+if [ -z "$NEWEST_SRC" ]; then ok "jar 比源码新"
+else bad "jar 落后于源码，先 ./gradlew build -x test（改动文件：$(echo "$NEWEST_SRC" | tr '\n' ' '))"; fi
+
 chk "6. 生产插件状态"
 ST=$(halo plugin list --profile "$PROFILE" 2>/dev/null | awk '/^property-fee/{print $NF}')
 [ "$ST" = "STARTED" ] && ok "STARTED" || { [ -z "$ST" ] && bad "生产未安装该插件" || warn "当前状态 $ST（升级会重启，属正常）"; }
