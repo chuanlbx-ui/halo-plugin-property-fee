@@ -329,6 +329,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+
+import { fmtBuilding, fmtUnit } from '../utils/format'
 import {
   VButton,
   VDropdownDivider,
@@ -621,7 +623,7 @@ async function saveProperty() {
 function remove(p: any) {
   Dialog.warning({
     title: '删除房屋',
-    description: `确认删除「${p.spec?.community || ''} ${p.spec?.building || ''}栋 ${p.spec?.room || ''}」？该操作不可恢复。`,
+    description: `确认删除「${p.spec?.community || ''} ${fmtBuilding(p.spec?.building)} ${p.spec?.room || ''}」？该操作不可恢复。`,
     confirmText: '删除',
     onConfirm: async () => {
       try {
@@ -743,8 +745,8 @@ async function downloadTemplate() {
 /* ------------------------------- 展示辅助 ------------------------------- */
 function houseLabel(spec: any): string {
   if (!spec) return '-'
-  const unit = spec.unit ? `${spec.unit}单元` : ''
-  return `${spec.community || '-'} ${spec.building || '-'}栋${unit}${spec.room || ''}`
+  const unit = fmtUnit(spec.unit)
+  return `${spec.community || '-'} ${fmtBuilding(spec.building)}${unit}${spec.room || ''}`
 }
 
 function ownerNames(spec: any): string {

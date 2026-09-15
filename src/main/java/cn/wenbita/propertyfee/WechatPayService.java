@@ -149,7 +149,11 @@ public class WechatPayService {
                 org.springframework.data.domain.Sort.unsorted())
             .filter(pc -> pc.getSpec() != null && isEnabled(pc)
                 && (community.equals(pc.getSpec().getCommunity())
-                    || DEFAULT_COMMUNITY.equals(pc.getSpec().getCommunity())))
+                    || DEFAULT_COMMUNITY.equals(pc.getSpec().getCommunity()))
+                // 只列「真正的渠道」：未命名记录是凭据容器（如自动注入的默认商户配置），
+                // 它没有渠道名，列出来会变成一个用户看不懂的 wechat_native 选项
+                && pc.getSpec().getChannelName() != null
+                && !pc.getSpec().getChannelName().isBlank())
             .collectList()
             .map(list -> list.stream().map(pc -> {
                 var s = pc.getSpec();

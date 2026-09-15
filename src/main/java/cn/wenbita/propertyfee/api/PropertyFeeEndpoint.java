@@ -197,13 +197,24 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 查费 ============
 
     private Mono<ServerResponse> feeQuery(ServerRequest request) {
-        // 匿名可查费额；但业主个人资料必须持有有效业主令牌且为该房屋登记业主才返回
+        // 🚨 对外风险：该接口返回房屋面积/单价/应缴金额，属经营数据。
+        // 必须业主登录（X-Owner-Token）后才可调用，防同行匿名寻价（V5 前台已改用 owner/houses）。
         final String verifiedPhone = tryResolveOwnerPhone(request);
+        if (verifiedPhone == null) {
+            return unauthorized("请先登录业主账号后再查询费用");
+        }
         return request.bodyToMono(FeeQueryRequest.class)
             .switchIfEmpty(Mono.error(new PropertyFeeException("请求体不能为空")))
             .flatMap(req -> calculateFee(req, verifiedPhone))
             .flatMap(result -> ServerResponse.ok().bodyValue(result))
             .onErrorResume(PropertyFeeException.class, e -> badRequest(e.getMessage()));
+    }
+
+    /** 未登录（或令牌无效）统一返回 401 + JSON，不泄露任何业务数据。 */
+    private static Mono<ServerResponse> unauthorized(String message) {
+        return ServerResponse.status(HttpStatus.UNAUTHORIZED)
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .bodyValue(Map.of("message", message));
     }
 
     /** 尝试解析业主令牌；未携带或无效时返回 null（按匿名处理，不报错）。 */
@@ -282,15 +293,42 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
                     return Mono.error(new PropertyFeeException(
                         "该小区 " + year + " 年收费标准未配置，请联系物业"));
                 }
-                // 优先匹配物业类型（住宅/商铺/车位）；否则取第一条
+                // 定序：先按创建时间（旧数据稳定），再按名称，避免同小区多条标准时取到随机一条
+                List<FeeStandard> ordered = new ArrayList<>(list);
+                ordered.sort((a, b) -> {
+                    var ta = a.getMetadata() == null ? null : a.getMetadata().getCreationTimestamp();
+                    var tb = b.getMetadata() == null ? null : b.getMetadata().getCreationTimestamp();
+                    if (ta != null && tb != null && !ta.equals(tb)) {
+                        return ta.compareTo(tb);
+                    }
+                    String na = a.getMetadata() == null ? "" : String.valueOf(a.getMetadata().getName());
+                    String nb = b.getMetadata() == null ? "" : String.valueOf(b.getMetadata().getName());
+                    return na.compareTo(nb);
+                });
+                // 1. 物业类型精确匹配
                 if (propertyType != null && !propertyType.isBlank()) {
-                    var hit = list.stream().filter(fs -> propertyType.equals(fs.getSpec().getPropertyType()))
+                    var hit = ordered.stream().filter(fs -> propertyType.equals(fs.getSpec().getPropertyType()))
                         .findFirst().orElse(null);
                     if (hit != null) {
                         return Mono.just(hit);
                     }
                 }
-                return Mono.just(list.get(0));
+                // 2. 通用标准（未指定物业类型）
+                var generic = ordered.stream()
+                    .filter(fs -> fs.getSpec().getPropertyType() == null
+                        || fs.getSpec().getPropertyType().isBlank())
+                    .findFirst().orElse(null);
+                if (generic != null) {
+                    return Mono.just(generic);
+                }
+                // 3. 只有一条标准 → 无歧义，可用
+                if (ordered.size() == 1) {
+                    return Mono.just(ordered.get(0));
+                }
+                // 4. 多条且都不匹配：宁可报错，也不静默按别的物业类型计费
+                return Mono.error(new PropertyFeeException("该小区 " + year
+                    + " 年未配置「" + (propertyType == null || propertyType.isBlank() ? "通用" : propertyType)
+                    + "」类型的收费标准，请联系物业核对，避免按其他类型误计费"));
             });
     }
 
@@ -727,6 +765,10 @@ public class PropertyFeeEndpoint implements CustomEndpoint {
     // ============ 下拉选项数据 ============
 
     private Mono<ServerResponse> queryOptions(ServerRequest request) {
+        // 🚨 对外风险：小区/楼栋/房号清单属经营数据，业主登录后才可获取（防同行匿名盘库）。
+        if (tryResolveOwnerPhone(request) == null) {
+            return unauthorized("请先登录业主账号后再查询");
+        }
         return client.listAll(Property.class, ListOptions.builder().build(),
                 org.springframework.data.domain.Sort.unsorted())
             .collectList()

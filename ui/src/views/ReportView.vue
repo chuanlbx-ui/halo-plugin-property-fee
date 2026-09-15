@@ -67,7 +67,7 @@
         <VEntityContainer>
           <VEntity v-for="b in byBuilding" :key="`${b.community}-${b.building}`">
             <template #start>
-              <VEntityField :title="`${b.community || '-'} ${b.building || '-'}栋`" :max-width="240" />
+              <VEntityField :title="`${b.community || '-'} ${fmtBuilding(b.building)}`" :max-width="240" />
               <VEntityField :title="`${b.total}`" description="总户数" :width="100" />
               <VEntityField :title="`${b.paid}`" description="已缴" :width="100" />
               <VEntityField :title="`${b.unpaid}`" description="未缴" :width="100" />
@@ -100,7 +100,7 @@
           >
             <template #start>
               <VEntityField
-                :title="`${r.spec.community || '-'} ${r.spec.building || '-'}栋${r.spec.room || ''}`"
+                :title="`${r.spec.community || '-'} ${fmtBuilding(r.spec.building)}${r.spec.room || ''}`"
                 :description="`业主：${r.spec.ownerName || '-'}`"
                 :max-width="260"
               />
@@ -163,6 +163,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+
+import { fmtBuilding } from '../utils/format'
 import {
   VAlert,
   VButton,
@@ -250,7 +252,7 @@ function isPending(r: any) {
 
 /** 记录定位文案，用于二次确认弹窗 */
 function recordLabel(r: any) {
-  return `${r.spec?.community || '-'} ${r.spec?.building || '-'}栋${r.spec?.room || ''}`
+  return `${r.spec?.community || '-'} ${fmtBuilding(r.spec?.building)}${r.spec?.room || ''}`
 }
 
 function confirmRecord(r: any) {

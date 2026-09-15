@@ -26,7 +26,17 @@ smoke() { # 名称 URL 期望码 [需要鉴权]
 echo "=== 物业费插件 · 冒烟验证 ==="
 smoke "前台缴费页"        "$API/pages/property-fee" 200
 smoke "aiedu 代理 /wuye"  "$PROXY_SITE/wuye" 200
-smoke "小区选项接口"      "$API/properties/options" 200
+# 经营数据接口（小区/楼栋/房号清单、按房查费）：匿名必须被拒（401）
+for _ep in "properties/options" "properties/fee-query"; do
+  TOTAL=$((TOTAL + 1))
+  if [ "$_ep" = "properties/fee-query" ]; then
+    C=$(curl -s -o /dev/null -w '%{http_code}' -m 25 -X POST -H 'Content-Type: application/json' -d '{}' "$API/$_ep")
+  else
+    C=$(curl -s -o /dev/null -w '%{http_code}' -m 25 "$API/$_ep")
+  fi
+  if [ "$C" = "401" ] || [ "$C" = "302" ]; then printf '  %-40s ✓ %s（匿名被拒）\n' "匿名读经营数据/$_ep" "$C"; PASS=$((PASS + 1));
+  else printf '  %-40s ✗ %s（匿名不应可读）\n' "匿名读经营数据/$_ep" "$C"; fi
+done
 smoke "后台-房屋"         "$CONSOLE/properties?page=0&size=1" 200 auth
 smoke "后台-小区"         "$CONSOLE/communities" 200 auth
 smoke "后台-收费标准"     "$CONSOLE/feestandards?page=0&size=1" 200 auth

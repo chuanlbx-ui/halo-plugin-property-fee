@@ -31,11 +31,60 @@
 .pf-view {
   width: 100%;
   min-width: 0;
+  /* Halo 控制台不为插件页面提供内边距（官方示例靠 Tailwind 的 p-4，
+     本插件刻意不依赖 Tailwind），因此这里显式给出页面留白。 */
+  padding: 16px 20px 32px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .pf-view {
+    padding: 12px 12px 24px;
+  }
 }
 
 /* VCard 之间统一间距 */
 .pf-view .pf-card-gap {
   margin-bottom: 16px;
+}
+
+/* 卡片边界与内边距：Halo 组件自带卡片结构（.card-wrapper/.card-header/
+   .card-body），但控制台 Tailwind 是 JIT 生成，插件页面不一定拿到 p-4，
+   所以这里显式补齐，保证「有卡片轮廓、内容不贴边」。 */
+.pf-view .card-wrapper {
+  background: #fff;
+  border: 1px solid var(--pf-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pf-view .card-header {
+  border-bottom: 1px solid var(--pf-border-color);
+}
+
+.pf-view .card-body {
+  padding: 14px 16px;
+}
+
+.pf-view .card-footer {
+  border-top: 1px solid var(--pf-border-color);
+  padding: 10px 16px;
+}
+
+/* 列表行分隔线（VEntity 列表 / 普通表格行） */
+.pf-view .pf-list .entity-wrapper + .entity-wrapper,
+.pf-view .pf-list > * > * + * {
+  border-top: 1px solid var(--pf-border-color);
+}
+
+.pf-view .pf-list table th,
+.pf-view .pf-list table td {
+  padding: 10px 12px;
+}
+
+.pf-view .pf-list table thead th {
+  border-bottom: 1px solid var(--pf-border-color);
+  text-align: left;
 }
 
 /* ---------------------------------------------------------------------------

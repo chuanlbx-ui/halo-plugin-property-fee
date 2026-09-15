@@ -71,7 +71,7 @@ public class ImportService {
             grouped.computeIfAbsent(community + "|" + (building == null ? "" : building) + "|"
                 + (unit == null ? "" : unit) + "|" + room, k -> new ArrayList<>()).add(r);
         }
-        return upsertCommunities(grouped, counters, errors)
+        return upsertCommunities(grouped, counters, errors, dryRun)
             .then(Mono.defer(() -> upsertHouses(grouped, counters, errors, dryRun)))
             .then(Mono.defer(() -> upsertStandards(grouped, counters, errors, dryRun)))
             .then(Mono.fromSupplier(() -> new ImportResult(counters[0], counters[1], counters[2],
@@ -81,7 +81,7 @@ public class ImportService {
     // ==================== 小区（含楼栋清单） ====================
 
     private Mono<Void> upsertCommunities(Map<String, List<Map<String, String>>> grouped,
-        int[] counters, List<String> errors) {
+        int[] counters, List<String> errors, boolean dryRun) {
         Set<String> names = new LinkedHashSet<>();
         Map<String, Set<String>> buildings = new LinkedHashMap<>();
         for (String key : grouped.keySet()) {
@@ -106,7 +106,8 @@ public class ImportService {
                     spec.setBuildings(new ArrayList<>(buildings.getOrDefault(name, Set.of())));
                     c.setSpec(spec);
                     counters[0]++;
-                    return client.create(c).then();
+                    // dryRun（预检）绝不写库：曾发生「预检也真建小区」的脏数据
+                    return dryRun ? Mono.<Void>empty() : client.create(c).then();
                 }
                 boolean changed = false;
                 var spec = hit.getSpec();
@@ -122,6 +123,9 @@ public class ImportService {
                 if (spec.getEnabled() == null) {
                     spec.setEnabled(true);
                     changed = true;
+                }
+                if (dryRun) {
+                    return Mono.<Void>empty();
                 }
                 return changed ? client.update(hit).then() : Mono.<Void>empty();
             })).then();
